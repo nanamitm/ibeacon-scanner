@@ -59,10 +59,14 @@ target_link_libraries(ibeacon-scanner PRIVATE
 
 # Android固有設定
 if(ANDROID)
-    set_property(TARGET ibeacon-scanner PROPERTY
+    set_target_properties(ibeacon-scanner PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
+        QT_ANDROID_PACKAGE_NAME "io.github.nanamitm.ibeaconscanner"
+        QT_ANDROID_APP_NAME "iBeacon Scanner"
+        QT_ANDROID_APP_ICON "@drawable/app_icon"
     )
 endif()
+
 
 
 
