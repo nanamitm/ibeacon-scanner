@@ -1,0 +1,337 @@
+#include "BeaconScanner.h"
+#include <QBluetoothDeviceInfo>
+#include <QBluetoothLocalDevice>
+#include <QDateTime>
+#include <QtEndian>
+#include <QDebug>
+#include <QSettings>
+#include <cmath>
+
+// --- BeaconModel ---
+
+BeaconModel::BeaconModel(QObject *parent) : QAbstractListModel(parent) {
+    m_txPowerOffset = QSettings().value("beacon/txPowerOffset", 0).toInt();
+    m_elapsedTimer.setInterval(1000);
+    connect(&m_elapsedTimer, &QTimer::timeout, this, &BeaconModel::refreshElapsedTimes);
+    m_elapsedTimer.start();
+}
+
+int BeaconModel::rowCount(const QModelIndex &parent) const {
+    return parent.isValid() ? 0 : m_beacons.size();
+}
+
+QVariant BeaconModel::data(const QModelIndex &index, int role) const {
+    if (!index.isValid() || index.row() >= m_beacons.size())
+        return {};
+    const auto &b = m_beacons.at(index.row());
+    switch (role) {
+    case AddressRole:   return b.address;
+    case NameRole:      return b.name;
+    case UuidRole:      return b.uuid;
+    case MajorRole:     return b.major;
+    case MinorRole:     return b.minor;
+    case RssiRole:      return b.rssi;
+    case IsIBeaconRole: return b.isIBeacon();
+    case DistanceRole:  return b.estimatedDistance(m_txPowerOffset);
+    case LastSeenRole:  return elapsedText(b.lastSeen);
+    }
+    return {};
+}
+
+QHash<int, QByteArray> BeaconModel::roleNames() const {
+    return {
+        {AddressRole,   "address"},
+        {NameRole,      "deviceName"},
+        {UuidRole,      "uuid"},
+        {MajorRole,     "major"},
+        {MinorRole,     "minor"},
+        {RssiRole,      "rssi"},
+        {IsIBeaconRole, "isIBeacon"},
+        {DistanceRole,  "distance"},
+        {LastSeenRole,  "lastSeen"},
+    };
+}
+
+void BeaconModel::updateOrAdd(const BeaconInfo &info) {
+    for (int i = 0; i < m_beacons.size(); ++i) {
+        if (m_beacons[i].address == info.address) {
+            m_beacons[i] = info;
+            emit dataChanged(index(i), index(i));
+            return;
+        }
+    }
+    beginInsertRows({}, m_beacons.size(), m_beacons.size());
+    m_beacons.append(info);
+    endInsertRows();
+}
+
+void BeaconModel::clear() {
+    beginResetModel();
+    m_beacons.clear();
+    endResetModel();
+}
+
+QString BeaconModel::elapsedText(const QDateTime &dateTime) const {
+    if (!dateTime.isValid())
+        return {};
+
+    const qint64 seconds = qMax<qint64>(0, dateTime.secsTo(QDateTime::currentDateTime()));
+    if (seconds < 3)
+        return "たった今";
+    if (seconds < 60)
+        return QString("%1秒前").arg(seconds);
+
+    const qint64 minutes = seconds / 60;
+    if (minutes < 60)
+        return QString("%1分前").arg(minutes);
+
+    const qint64 hours = minutes / 60;
+    if (hours < 24)
+        return QString("%1時間前").arg(hours);
+
+    return QString("%1日前").arg(hours / 24);
+}
+
+void BeaconModel::refreshElapsedTimes() {
+    if (m_beacons.isEmpty())
+        return;
+    emit dataChanged(index(0), index(m_beacons.size() - 1), {LastSeenRole});
+}
+
+void BeaconModel::setTxPowerOffset(int offset) {
+    if (m_txPowerOffset == offset) return;
+    m_txPowerOffset = offset;
+    QSettings().setValue("beacon/txPowerOffset", offset);
+    emit txPowerOffsetChanged();
+    if (!m_beacons.isEmpty())
+        emit dataChanged(index(0), index(m_beacons.size() - 1), {DistanceRole});
+}
+
+// --- BeaconScanner ---
+
+BeaconScanner::BeaconScanner(QObject *parent) : QObject(parent) {
+    m_restartTimer.setInterval(30000);
+    m_agent.setLowEnergyDiscoveryTimeout(m_restartTimer.interval());
+
+    // allDevices() はブロッキング呼び出しのためイベントループ開始後に実行
+    QTimer::singleShot(0, this, [this] {
+        QBluetoothLocalDevice localDevice;
+        const int adapterCount = QBluetoothLocalDevice::allDevices().size();
+        addLog(QString("[Init] QBluetoothLocalDevice::allDevices() = %1 件").arg(adapterCount));
+        if (localDevice.isValid()) {
+            addLog(QString("[Init] アダプタ名: %1").arg(localDevice.name()));
+            addLog(QString("[Init] アドレス: %1").arg(localDevice.address().toString()));
+            const QString state = (localDevice.hostMode() == QBluetoothLocalDevice::HostPoweredOff)
+                                  ? "OFF" : "ON";
+            addLog(QString("[Init] 電源状態: %1").arg(state));
+        } else {
+            addLog("[Init] QBluetoothLocalDevice 無効 (Windows WinRTバックエンドでは既知の動作・問題なし)");
+        }
+    });
+
+    connect(&m_agent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
+            this, &BeaconScanner::onDeviceDiscovered);
+    connect(&m_agent, &QBluetoothDeviceDiscoveryAgent::errorOccurred,
+            this, &BeaconScanner::onErrorOccurred);
+    connect(&m_agent, &QBluetoothDeviceDiscoveryAgent::finished,
+            this, [this]{
+                if (!m_scanning) {
+                    setStatusText("スキャン完了");
+                    return;
+                }
+                addLog("[Scan] スキャンエージェント finished シグナル受信。1秒後に再開します");
+                setStatusText("スキャン待機中");
+                scheduleRestart();
+            });
+
+    // Windows WinRTは強制 stop/start を短周期で繰り返すと USB アダプターが固まることがあるため、
+    // LowEnergyDiscoveryTimeout の自然終了後に短い休止を挟んで再開する。
+}
+
+void BeaconScanner::startScan() {
+    m_restarting = false;
+    if (m_agent.isActive())
+        m_agent.stop();
+    m_model.clear();
+
+    // サポートされているメソッドを確認してログ出力（初回のみ）
+    const auto supported = QBluetoothDeviceDiscoveryAgent::supportedDiscoveryMethods();
+    QStringList methodNames;
+    if (supported & QBluetoothDeviceDiscoveryAgent::NoMethod)        methodNames << "NoMethod";
+    if (supported & QBluetoothDeviceDiscoveryAgent::ClassicMethod)   methodNames << "Classic";
+    if (supported & QBluetoothDeviceDiscoveryAgent::LowEnergyMethod) methodNames << "LowEnergy";
+    addLog("[Scan] supportedDiscoveryMethods: " +
+           (methodNames.isEmpty() ? "なし(0)" : methodNames.join(", ")));
+
+    if (!(supported & QBluetoothDeviceDiscoveryAgent::LowEnergyMethod)) {
+        addLog("[Scan] ⚠ LowEnergyMethod が未サポートです。Windowsのプライバシー設定を確認してください");
+        setStatusText("エラー: BLE未サポート");
+        return;
+    }
+
+    addLog("[Scan] スキャン開始 (LowEnergyMethod)");
+    m_agent.setLowEnergyDiscoveryTimeout(m_restartTimer.interval());
+    m_agent.start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+    if (m_agent.error() != QBluetoothDeviceDiscoveryAgent::NoError) {
+        addLog("[Scan] ⚠ start() 直後エラー: " + m_agent.errorString());
+        return;
+    }
+    addLog("[Scan] start() 成功");
+    m_scanning = true;
+    emit scanningChanged();
+    setStatusText(QString("スキャン中 (最大%1秒ごとに更新)...").arg(m_restartTimer.interval() / 1000));
+}
+
+void BeaconScanner::stopScan() {
+    m_restarting = false;
+    m_scanning = false;
+    emit scanningChanged();
+    addLog("[Scan] スキャン停止");
+    if (m_agent.isActive())
+        m_agent.stop();
+    setStatusText("停止");
+}
+
+void BeaconScanner::scheduleRestart() {
+    if (!m_scanning || m_restarting)
+        return;
+
+    m_restarting = true;
+    QTimer::singleShot(1000, this, [this] {
+        if (!m_scanning) {
+            m_restarting = false;
+            return;
+        }
+
+        m_agent.setLowEnergyDiscoveryTimeout(m_restartTimer.interval());
+        m_agent.start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+        if (m_agent.error() != QBluetoothDeviceDiscoveryAgent::NoError) {
+            m_restarting = false;
+            addLog("[Scan] ⚠ restart start() エラー: " + m_agent.errorString());
+            return;
+        }
+
+        setStatusText(QString("スキャン中 (最大%1秒ごとに更新)...").arg(m_restartTimer.interval() / 1000));
+        m_restarting = false;
+    });
+}
+
+void BeaconScanner::setScanInterval(int ms) {
+    const int clamped = qBound(5000, ms, 30000);
+    if (m_restartTimer.interval() == clamped) return;
+    m_restartTimer.setInterval(clamped);
+    m_agent.setLowEnergyDiscoveryTimeout(clamped);
+    emit scanIntervalChanged();
+    if (m_scanning)
+        setStatusText(QString("スキャン中 (最大%1秒ごとに更新)...").arg(clamped / 1000));
+}
+
+void BeaconScanner::clearLog() {
+    m_logModel.setStringList({});
+}
+
+void BeaconScanner::onDeviceDiscovered(const QBluetoothDeviceInfo &info) {
+    BeaconInfo beacon;
+    beacon.address = info.address().toString();
+    beacon.name    = info.name();
+    beacon.rssi    = info.rssi();
+    beacon.lastSeen = QDateTime::currentDateTime();
+
+    // デバイス種別フラグ
+    QString typeStr;
+    if (info.coreConfigurations() & QBluetoothDeviceInfo::LowEnergyCoreConfiguration)
+        typeStr += "BLE ";
+    if (info.coreConfigurations() & QBluetoothDeviceInfo::BaseRateCoreConfiguration)
+        typeStr += "BR/EDR ";
+    if (typeStr.isEmpty()) typeStr = "Unknown";
+
+    addLog(QString("[Dev] %1 | %2| RSSI:%3 | %4")
+           .arg(beacon.address)
+           .arg(typeStr)
+           .arg(beacon.rssi)
+           .arg(beacon.name.isEmpty() ? "(no name)" : beacon.name));
+
+    // 全メーカーデータキーをログ出力
+    const auto keys = info.manufacturerIds();
+    if (keys.isEmpty()) {
+        addLog("      ManufacturerData: なし");
+    } else {
+        for (quint16 key : keys) {
+            const QByteArray d = info.manufacturerData(key);
+            addLog(QString("      ManufData[0x%1]: %2 bytes = %3")
+                   .arg(key, 4, 16, QLatin1Char('0'))
+                   .arg(d.size())
+                   .arg(QString(d.toHex(' '))));
+        }
+    }
+
+    parseIBeacon(info, beacon);
+    if (beacon.isIBeacon()) {
+        addLog(QString("      → iBeacon! UUID:%1 Maj:%2 Min:%3 TxPow:%4")
+               .arg(beacon.uuid).arg(beacon.major).arg(beacon.minor).arg(beacon.txPower));
+    }
+
+    m_model.updateOrAdd(beacon);
+}
+
+void BeaconScanner::parseIBeacon(const QBluetoothDeviceInfo &info, BeaconInfo &beacon) {
+    // Apple Company ID = 0x004C
+    const QByteArray data = info.manufacturerData(0x004C);
+    if (data.size() < 23) return;
+
+    // iBeacon type=0x02, length=0x15
+    if ((quint8)data[0] != 0x02 || (quint8)data[1] != 0x15) return;
+
+    // UUID (16 bytes, big-endian)
+    const quint8 *p = reinterpret_cast<const quint8 *>(data.constData()) + 2;
+    beacon.uuid = QString("%1%2%3%4-%5%6-%7%8-%9%10-%11%12%13%14%15%16")
+        .arg(p[0],2,16,QLatin1Char('0')).arg(p[1],2,16,QLatin1Char('0'))
+        .arg(p[2],2,16,QLatin1Char('0')).arg(p[3],2,16,QLatin1Char('0'))
+        .arg(p[4],2,16,QLatin1Char('0')).arg(p[5],2,16,QLatin1Char('0'))
+        .arg(p[6],2,16,QLatin1Char('0')).arg(p[7],2,16,QLatin1Char('0'))
+        .arg(p[8],2,16,QLatin1Char('0')).arg(p[9],2,16,QLatin1Char('0'))
+        .arg(p[10],2,16,QLatin1Char('0')).arg(p[11],2,16,QLatin1Char('0'))
+        .arg(p[12],2,16,QLatin1Char('0')).arg(p[13],2,16,QLatin1Char('0'))
+        .arg(p[14],2,16,QLatin1Char('0')).arg(p[15],2,16,QLatin1Char('0'))
+        .toUpper();
+
+    beacon.major   = qFromBigEndian<quint16>(data.constData() + 18);
+    beacon.minor   = qFromBigEndian<quint16>(data.constData() + 20);
+    beacon.txPower = (qint8)data[22];
+}
+
+void BeaconScanner::onErrorOccurred(QBluetoothDeviceDiscoveryAgent::Error error) {
+    addLog(QString("[Error] code=%1 : %2").arg(error).arg(m_agent.errorString()));
+    m_restarting = false;
+    m_scanning = false;
+    emit scanningChanged();
+    setStatusText("エラー: " + m_agent.errorString());
+}
+
+void BeaconScanner::setStatusText(const QString &text) {
+    m_statusText = text;
+    emit statusTextChanged();
+}
+
+void BeaconScanner::appendLog(const QString &text) {
+    addLog(text);
+}
+
+void BeaconScanner::addLog(const QString &text) {
+    const QString entry = QDateTime::currentDateTime().toString("hh:mm:ss.zzz") + " " + text;
+    qDebug().noquote() << entry;
+    QStringList list = m_logModel.stringList();
+    list.append(entry);
+    if (list.size() > 200) list.removeFirst(); // 最大200行
+    m_logModel.setStringList(list);
+}
+
+
+
+
+
+
+
+
+
+

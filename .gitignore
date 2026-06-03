@@ -1,0 +1,50 @@
+# Build outputs
+build/
+build-*/
+cmake-build-*/
+out/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+compile_commands.json
+Testing/
+
+# Qt generated files
+*_autogen/
+*.qmltypes
+*_qmltyperegistrations.cpp
+.qtc_clangd/
+.qt/
+.rcc/
+
+# Qt Creator user files
+.qtcreator/
+*.user
+*.user.*
+qtcsettings.cmake
+
+# Binaries and debug symbols
+*.exe
+*.dll
+*.so
+*.dylib
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.obj
+*.o
+*.a
+
+# Android generated outputs
+android-build*/
+*.apk
+*.aab
+
+# Local settings and OS files
+.DS_Store
+Thumbs.db
