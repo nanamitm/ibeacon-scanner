@@ -23,6 +23,8 @@ qt_add_executable(ibeacon-scanner
     src/BeaconInfo.h
     src/MqttReceiver.h
     src/MqttReceiver.cpp
+    src/HaReceiver.h
+    src/HaReceiver.cpp
     src/LocationHistory.h
     src/LocationHistory.cpp
 )
@@ -66,7 +68,4 @@ if(ANDROID)
         QT_ANDROID_APP_ICON "@drawable/app_icon"
     )
 endif()
-
-
-
 

@@ -13,16 +13,17 @@ ESPresense の MQTT トピックを購読して、デバイスの部屋移動履
 - TX Power 補正オフセットによる距離推定の調整
 - スキャン間隔の調整
 - ESPresense MQTT ブローカーへの接続
-- `espresense/devices/#` の購読
+- spresense/devices/# の購読
+- Home Assistant / Bermuda のAreaセンサー読み取り
 - 部屋情報の履歴保存と検索
 - 動作ログの表示
 
 ## 画面構成
 
 - `デバイス`: 検出した BLE / iBeacon デバイス一覧を表示します。
-- `履歴`: ESPresense から受信した部屋移動履歴を検索します。
+- `履歴`: ESPresense / Bermuda から受信した部屋移動履歴を検索します。
 - `ログ`: Bluetooth スキャンと MQTT の動作ログを表示します。
-- `設定`: TX Power 補正、MQTT 接続、スキャン間隔を設定します。
+- `設定`: TX Power 補正、MQTT 接続、Home Assistant / Bermuda 連携、スキャン間隔を設定します。
 
 ## 使い方
 
@@ -75,6 +76,17 @@ espresense/devices/#
 
 `room` が空でない場合、部屋情報を履歴に保存します。同じデバイスが同じ部屋に連続している場合は、重複記録を避けます。
 
+## Home Assistant / Bermuda 連携
+
+`設定` タブで Home Assistant のURLと Long-Lived Access Token を入力すると、Bermuda が作成するAreaセンサーを定期的に読み取れます。
+
+- Home Assistant URL
+- Long-Lived Access Token
+- 更新間隔
+- 起動時の自動接続
+
+Bermudaの `Area` センサーから現在の部屋を読み取り、部屋が変わったときに履歴へ保存します。現在は Home Assistant REST API の `/api/states` を定期ポーリングする方式です。
+
 ## 履歴と設定
 
 履歴は SQLite に保存されます。保存先は Qt の `AppDataLocation` 配下です。Windows と Android で実際の保存先は異なります。
@@ -88,6 +100,10 @@ espresense/devices/#
 - MQTT パスワード
 - MQTT 自動接続
 - TX Power 補正オフセット
+- Home Assistant URL
+- Home Assistant Long-Lived Access Token
+- Home Assistant 自動接続
+- Home Assistant 更新間隔
 
 ## 対応状況
 

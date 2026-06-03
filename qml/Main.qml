@@ -162,8 +162,13 @@ ApplicationWindow {
             }
 
             // --- タブ3: 設定 ---
-            ColumnLayout {
-                spacing: 16
+            ScrollView {
+                clip: true
+                contentWidth: availableWidth
+
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 16
 
                 // TX Power 補正
                 Text {
@@ -354,6 +359,119 @@ ApplicationWindow {
                     }
                 }
 
+
+                // Home Assistant / Bermuda接続設定
+                Text {
+                    text: "Home Assistant / Bermuda"
+                    font.pixelSize: 14
+                    font.bold: true
+                    color: theme.bodyText
+                }
+
+                GroupBox {
+                    title: ""
+                    Layout.fillWidth: true
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+
+                        Text {
+                            text: "Bermudaが作成するAreaセンサーをHome Assistant APIから読み取り、部屋移動履歴に保存します。"
+                            font.pixelSize: 12
+                            color: theme.bodyText
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "URL:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 70 }
+                            TextField {
+                                text: ha.serverUrl
+                                Layout.fillWidth: true
+                                placeholderText: "http://homeassistant.local:8123"
+                                onEditingFinished: ha.serverUrl = text
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "トークン:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 70 }
+                            TextField {
+                                text: ha.accessToken
+                                Layout.fillWidth: true
+                                placeholderText: "Long-Lived Access Token"
+                                echoMode: TextInput.Password
+                                onEditingFinished: ha.accessToken = text
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "更新間隔:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 70 }
+                            Slider {
+                                id: haPollSlider
+                                from: 5
+                                to: 60
+                                stepSize: 5
+                                value: ha.pollInterval / 1000
+                                Layout.fillWidth: true
+                                onMoved: ha.pollInterval = value * 1000
+                            }
+                            Text {
+                                text: ha.pollInterval / 1000 + " 秒"
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: theme.accentText
+                                Layout.preferredWidth: 44
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Rectangle {
+                                Layout.preferredWidth: 10; Layout.preferredHeight: 10; radius: 5
+                                color: ha.connected ? theme.success : theme.neutral
+                            }
+                            Text {
+                                text: ha.statusText
+                                font.pixelSize: 12
+                                color: theme.bodyText
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            Button {
+                                text: ha.connected ? "停止" : "接続"
+                                onClicked: ha.connected ? ha.disconnectServer()
+                                                        : ha.connectServer()
+                            }
+                        }
+
+                        RowLayout {
+                            spacing: 6
+
+                            CheckBox {
+                                id: haAutoConnectCheck
+                                text: ""
+                                checked: ha.autoConnect
+                                onToggled: ha.autoConnect = checked
+                            }
+
+                            Text {
+                                text: "起動時に自動接続する"
+                                color: theme.bodyText
+                                opacity: haAutoConnectCheck.enabled ? 1.0 : 0.45
+                                verticalAlignment: Text.AlignVCenter
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: haAutoConnectCheck.toggle()
+                                }
+                            }
+                        }
+                    }
+                }
                 // スキャン間隔
                 Text {
                     text: "スキャン更新間隔"
@@ -409,7 +527,8 @@ ApplicationWindow {
                     }
                 }
 
-                Item { Layout.fillHeight: true }
+                    Item { Layout.preferredHeight: 1 }
+                }
             }
         }
 
@@ -432,17 +551,4 @@ ApplicationWindow {
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
