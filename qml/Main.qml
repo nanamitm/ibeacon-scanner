@@ -316,9 +316,13 @@ ApplicationWindow {
                                 font.pixelSize: 12
                                 color: theme.bodyText
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 80
+                                elide: Text.ElideRight
                             }
                             Button {
                                 text: mqtt.connected ? "切断" : "接続"
+                                Layout.preferredWidth: 88
+                                Layout.minimumWidth: 88
                                 onClicked: mqtt.connected ? mqtt.disconnectBroker()
                                                           : mqtt.connectBroker()
                             }
@@ -425,14 +429,17 @@ ApplicationWindow {
                                 color: ha.connected ? theme.success : theme.neutral
                             }
                             Text {
-                                text: ha.statusText
+                                text: "状態: " + ha.statusText
                                 font.pixelSize: 12
                                 color: theme.bodyText
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 80
                                 elide: Text.ElideRight
                             }
                             Button {
                                 text: ha.connected ? "停止" : "接続"
+                                Layout.preferredWidth: 88
+                                Layout.minimumWidth: 88
                                 onClicked: ha.connected ? ha.disconnectServer()
                                                         : ha.connectServer()
                             }
