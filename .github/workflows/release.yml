@@ -29,7 +29,7 @@ jobs:
           host:     windows
           target:   desktop
           arch:     win64_msvc2022_64
-          # qtbluetooth は Qt 6.9.2 の基本パッケージに含まれるため指定不要
+          modules:  qtconnectivity
           cache:    true
 
       - name: Configure
@@ -70,7 +70,7 @@ jobs:
           host:     linux
           target:   desktop
           arch:     linux_gcc_64
-          # qtbluetooth は Qt 6.9.2 の基本パッケージに含まれるため指定不要
+          modules:  qtconnectivity
           cache:    true
 
       - name: Install system dependencies
@@ -154,7 +154,7 @@ jobs:
           host:     linux
           target:   android
           arch:     android_arm64_v8a
-          # qtbluetooth は Qt 6.9.2 の基本パッケージに含まれるため指定不要
+          modules:  qtconnectivity
           extra:    '--autodesktop'
           cache:    true
 
