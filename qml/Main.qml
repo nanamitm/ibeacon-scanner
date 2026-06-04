@@ -165,6 +165,7 @@ ApplicationWindow {
             ScrollView {
                 clip: true
                 contentWidth: availableWidth
+                ScrollBar.vertical.policy: ScrollBar.AlwaysOff
 
                 ColumnLayout {
                     width: parent.width
@@ -272,29 +273,18 @@ ApplicationWindow {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "ホスト:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 60 }
+                            Text { text: "URL:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 70 }
                             TextField {
-                                text: mqtt.brokerHost
+                                text: mqtt.brokerUrl
                                 Layout.fillWidth: true
-                                placeholderText: "192.168.1.x"
-                                onEditingFinished: mqtt.brokerHost = text
+                                placeholderText: "mqtt://192.168.1.x:1883"
+                                onEditingFinished: mqtt.brokerUrl = text
                             }
                         }
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "ポート:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 60 }
-                            SpinBox {
-                                from: 1; to: 65535; value: mqtt.brokerPort
-                                onValueModified: mqtt.brokerPort = value
-                                textFromValue: function(v) { return v.toString() }
-                                valueFromText: function(t) { return parseInt(t) }
-                            }
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text { text: "ユーザー:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 60 }
+                            Text { text: "ユーザー:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 70 }
                             TextField {
                                 text: mqtt.username
                                 Layout.fillWidth: true
@@ -305,7 +295,7 @@ ApplicationWindow {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "パスワード:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 60 }
+                            Text { text: "パスワード:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 70 }
                             TextField {
                                 text: mqtt.password
                                 Layout.fillWidth: true
@@ -551,4 +541,3 @@ ApplicationWindow {
         }
     }
 }
-

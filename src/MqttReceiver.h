@@ -6,6 +6,7 @@
 class MqttReceiver : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
+    Q_PROPERTY(QString brokerUrl READ brokerUrl WRITE setBrokerUrl NOTIFY brokerUrlChanged)
     Q_PROPERTY(QString brokerHost READ brokerHost WRITE setBrokerHost NOTIFY brokerHostChanged)
     Q_PROPERTY(int brokerPort READ brokerPort WRITE setBrokerPort NOTIFY brokerPortChanged)
     Q_PROPERTY(QString username READ username WRITE setUsername NOTIFY usernameChanged)
@@ -17,6 +18,7 @@ public:
     explicit MqttReceiver(QObject *parent = nullptr);
 
     bool connected() const { return m_connected; }
+    QString brokerUrl() const;
     QString brokerHost() const { return m_brokerHost; }
     int brokerPort() const { return m_brokerPort; }
     QString username() const { return m_username; }
@@ -24,6 +26,7 @@ public:
     bool autoConnect() const { return m_autoConnect; }
     QString statusText() const { return m_statusText; }
 
+    void setBrokerUrl(const QString &url);
     void setBrokerHost(const QString &host);
     void setBrokerPort(int port);
     void setUsername(const QString &username);
@@ -35,6 +38,7 @@ public:
 
 signals:
     void connectedChanged();
+    void brokerUrlChanged();
     void brokerHostChanged();
     void brokerPortChanged();
     void usernameChanged();

@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QSettings>
 #include <QDateTime>
+#include <QUrl>
 
 // --- MQTT 3.1.1 パケット構築 ---
 
@@ -95,6 +96,64 @@ MqttReceiver::MqttReceiver(QObject *parent) : QObject(parent) {
     connect(&m_pingTimer, &QTimer::timeout, this, &MqttReceiver::onPingTimer);
 }
 
+QString MqttReceiver::brokerUrl() const {
+    if (m_brokerHost.isEmpty()) return {};
+    return QString("mqtt://%1:%2").arg(m_brokerHost).arg(m_brokerPort);
+}
+
+void MqttReceiver::setBrokerUrl(const QString &url) {
+    QString normalized = url.trimmed();
+    if (normalized.isEmpty()) {
+        const bool changed = !m_brokerHost.isEmpty() || m_brokerPort != 1883;
+        m_brokerHost.clear();
+        m_brokerPort = 1883;
+        QSettings s;
+        s.setValue("mqtt/url", "");
+        s.setValue("mqtt/host", "");
+        s.setValue("mqtt/port", m_brokerPort);
+        if (changed) {
+            emit brokerUrlChanged();
+            emit brokerHostChanged();
+            emit brokerPortChanged();
+        }
+        return;
+    }
+
+    if (!normalized.contains("://"))
+        normalized.prepend("mqtt://");
+
+    const QUrl parsed(normalized);
+    QString host = parsed.host();
+    int port = parsed.port(1883);
+
+    if (host.isEmpty()) {
+        const QString withoutScheme = normalized.mid(normalized.indexOf("://") + 3);
+        const QStringList parts = withoutScheme.split(':');
+        host = parts.value(0).trimmed();
+        if (parts.size() > 1) {
+            bool ok = false;
+            const int parsedPort = parts.value(1).toInt(&ok);
+            if (ok) port = parsedPort;
+        }
+    }
+
+    port = qBound(1, port, 65535);
+    const bool hostChanged = m_brokerHost != host;
+    const bool portChanged = m_brokerPort != port;
+    if (!hostChanged && !portChanged) return;
+
+    m_brokerHost = host;
+    m_brokerPort = port;
+
+    QSettings s;
+    s.setValue("mqtt/url", brokerUrl());
+    s.setValue("mqtt/host", m_brokerHost);
+    s.setValue("mqtt/port", m_brokerPort);
+
+    emit brokerUrlChanged();
+    if (hostChanged) emit brokerHostChanged();
+    if (portChanged) emit brokerPortChanged();
+}
 void MqttReceiver::setBrokerHost(const QString &host) {
     if (m_brokerHost == host) return;
     m_brokerHost = host;
@@ -132,12 +191,12 @@ void MqttReceiver::setAutoConnect(bool enabled) {
 
 void MqttReceiver::connectBroker() {
     if (m_brokerHost.isEmpty()) {
-        addLog("[MQTT] ⚠ ホストが未入力です");
-        setStatusText("ホストを入力してください");
+        addLog("[MQTT] ⚠ URLが未入力です");
+        setStatusText("URLを入力してください");
         return;
     }
     m_buffer.clear();
-    addLog(QString("[MQTT] 接続開始 → %1:%2").arg(m_brokerHost).arg(m_brokerPort));
+    addLog(QString("[MQTT] 接続開始 → %1").arg(brokerUrl()));
     if (!m_username.isEmpty())
         addLog(QString("[MQTT] 認証あり (user: %1)").arg(m_username));
     else
@@ -212,7 +271,7 @@ void MqttReceiver::processPacket(quint8 typeAndFlags, const QByteArray &data) {
         if (returnCode == 0x00) {
             m_connected = true;
             emit connectedChanged();
-            const QString msg = QString("接続済み: %1:%2").arg(m_brokerHost).arg(m_brokerPort);
+            const QString msg = QString("接続済み: %1").arg(brokerUrl());
             addLog("[MQTT] CONNACK: 接続承認");
             addLog("[MQTT] espresense/devices/# をサブスクライブ");
             setStatusText(msg);
