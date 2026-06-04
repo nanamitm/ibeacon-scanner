@@ -11,8 +11,10 @@
 
 int main(int argc, char *argv[]) {
     QGuiApplication::setDesktopSettingsAware(true);
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID)
     QQuickStyle::setStyle("Material");
+#elif defined(Q_OS_LINUX)
+    QQuickStyle::setStyle("Fusion");
 #else
     QQuickStyle::setStyle("Windows");
 #endif
