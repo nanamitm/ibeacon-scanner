@@ -207,6 +207,7 @@ void BeaconModel::setTxPowerOffset(int offset) {
 BeaconScanner::BeaconScanner(QObject *parent) : QObject(parent) {
     m_restartTimer.setInterval(30000);
     m_agent.setLowEnergyDiscoveryTimeout(m_restartTimer.interval());
+    m_verboseLogging = QSettings().value("beacon/verboseLogging", false).toBool();
 
     // allDevices() はブロッキング呼び出しのためイベントループ開始後に実行
     QTimer::singleShot(0, this, [this] {
@@ -292,6 +293,7 @@ void BeaconScanner::startScan() {
 void BeaconScanner::doStartScan() {
     m_restarting = false;
     m_model.clear();
+    m_lastBeaconLogByAddress.clear();
 
 #ifdef Q_OS_ANDROID
     startAndroidScan();
@@ -377,8 +379,29 @@ void BeaconScanner::setScanInterval(int ms) {
         setStatusText(QString("スキャン中 (最大%1秒ごとに更新)...").arg(clamped / 1000));
 }
 
+void BeaconScanner::setVerboseLogging(bool enabled) {
+    if (m_verboseLogging == enabled) return;
+    m_verboseLogging = enabled;
+    QSettings().setValue("beacon/verboseLogging", enabled);
+    emit verboseLoggingChanged();
+    addLog(enabled ? "[Log] 詳細ログを有効にしました" : "[Log] 詳細ログを無効にしました");
+}
+
 void BeaconScanner::clearLog() {
     m_logModel.setStringList({});
+}
+
+bool BeaconScanner::shouldLogBeaconSummary(const QString &address) {
+    if (m_verboseLogging)
+        return true;
+
+    const QDateTime now = QDateTime::currentDateTime();
+    auto it = m_lastBeaconLogByAddress.find(address);
+    if (it != m_lastBeaconLogByAddress.end() && it.value().secsTo(now) < 10)
+        return false;
+
+    m_lastBeaconLogByAddress.insert(address, now);
+    return true;
 }
 
 void BeaconScanner::onDeviceDiscovered(const QBluetoothDeviceInfo &info) {
@@ -396,30 +419,37 @@ void BeaconScanner::onDeviceDiscovered(const QBluetoothDeviceInfo &info) {
         typeStr += "BR/EDR ";
     if (typeStr.isEmpty()) typeStr = "Unknown";
 
-    addLog(QString("[Dev] %1 | %2| RSSI:%3 | %4")
-           .arg(beacon.address)
-           .arg(typeStr)
-           .arg(beacon.rssi)
-           .arg(beacon.name.isEmpty() ? "(no name)" : beacon.name));
+    parseIBeacon(info, beacon);
 
-    // 全メーカーデータキーをログ出力
-    const auto keys = info.manufacturerIds();
-    if (keys.isEmpty()) {
-        addLog("      ManufacturerData: なし");
-    } else {
-        for (quint16 key : keys) {
-            const QByteArray d = info.manufacturerData(key);
-            addLog(QString("      ManufData[0x%1]: %2 bytes = %3")
-                   .arg(key, 4, 16, QLatin1Char('0'))
-                   .arg(d.size())
-                   .arg(QString(d.toHex(' '))));
+    if (m_verboseLogging) {
+        addLog(QString("[Dev] %1 | %2| RSSI:%3 | %4")
+               .arg(beacon.address)
+               .arg(typeStr)
+               .arg(beacon.rssi)
+               .arg(beacon.name.isEmpty() ? "(no name)" : beacon.name));
+
+        const auto keys = info.manufacturerIds();
+        if (keys.isEmpty()) {
+            addLog("      ManufacturerData: なし");
+        } else {
+            for (quint16 key : keys) {
+                const QByteArray d = info.manufacturerData(key);
+                addLog(QString("      ManufData[0x%1]: %2 bytes = %3")
+                       .arg(key, 4, 16, QLatin1Char('0'))
+                       .arg(d.size())
+                       .arg(QString(d.toHex(' '))));
+            }
         }
     }
 
-    parseIBeacon(info, beacon);
-    if (beacon.isIBeacon()) {
-        addLog(QString("      → iBeacon! UUID:%1 Maj:%2 Min:%3 TxPow:%4")
-               .arg(beacon.uuid).arg(beacon.major).arg(beacon.minor).arg(beacon.txPower));
+    if (beacon.isIBeacon() && shouldLogBeaconSummary(beacon.address)) {
+        addLog(QString("[Dev] iBeacon! %1 | RSSI:%2 | UUID:%3 Maj:%4 Min:%5 TxPow:%6")
+               .arg(beacon.address)
+               .arg(beacon.rssi)
+               .arg(beacon.uuid)
+               .arg(beacon.major)
+               .arg(beacon.minor)
+               .arg(beacon.txPower));
     }
 
     m_model.updateOrAdd(beacon);
@@ -588,11 +618,13 @@ void BeaconScanner::onAndroidScanResult(const QString &address, const QString &n
     beacon.rssi     = rssi;
     beacon.lastSeen = QDateTime::currentDateTime();
 
-    addLog(QString("[Dev] %1 | BLE | RSSI:%2 | %3")
-           .arg(address).arg(rssi)
-           .arg(name.isEmpty() ? "(no name)" : name));
-
     bool foundManuf = false;
+    if (m_verboseLogging) {
+        addLog(QString("[Dev] %1 | BLE | RSSI:%2 | %3")
+               .arg(address).arg(rssi)
+               .arg(name.isEmpty() ? "(no name)" : name));
+    }
+
     for (int i = 0; i + 1 < scanRecord.size(); ) {
         const int length = static_cast<quint8>(scanRecord[i]);
         if (length == 0) break;
@@ -601,16 +633,18 @@ void BeaconScanner::onAndroidScanResult(const QString &address, const QString &n
         if (type == 0xFF && length >= 3) {
             const quint16 cid = static_cast<quint8>(scanRecord[i + 2])
                               | (static_cast<quint8>(scanRecord[i + 3]) << 8);
-            const QByteArray d = scanRecord.mid(i + 2, length - 1);
-            addLog(QString("      ManufData[0x%1]: %2 bytes = %3")
-                   .arg(cid, 4, 16, QLatin1Char('0'))
-                   .arg(d.size())
-                   .arg(QString(d.toHex(' '))));
+            if (m_verboseLogging) {
+                const QByteArray d = scanRecord.mid(i + 2, length - 1);
+                addLog(QString("      ManufData[0x%1]: %2 bytes = %3")
+                       .arg(cid, 4, 16, QLatin1Char('0'))
+                       .arg(d.size())
+                       .arg(QString(d.toHex(' '))));
+            }
             foundManuf = true;
         }
         i += 1 + length;
     }
-    if (!foundManuf)
+    if (m_verboseLogging && !foundManuf)
         addLog("      ManufacturerData: なし");
 
     const QByteArray appleData = extractManufData(scanRecord, 0x004C);
@@ -632,8 +666,15 @@ void BeaconScanner::onAndroidScanResult(const QString &address, const QString &n
         beacon.major   = qFromBigEndian<quint16>(appleData.constData() + 18);
         beacon.minor   = qFromBigEndian<quint16>(appleData.constData() + 20);
         beacon.txPower = static_cast<qint8>(appleData[22]);
-        addLog(QString("      → iBeacon! UUID:%1 Maj:%2 Min:%3 TxPow:%4")
-               .arg(beacon.uuid).arg(beacon.major).arg(beacon.minor).arg(beacon.txPower));
+        if (shouldLogBeaconSummary(address)) {
+            addLog(QString("[Dev] iBeacon! %1 | RSSI:%2 | UUID:%3 Maj:%4 Min:%5 TxPow:%6")
+               .arg(address)
+               .arg(rssi)
+               .arg(beacon.uuid)
+               .arg(beacon.major)
+               .arg(beacon.minor)
+               .arg(beacon.txPower));
+        }
     }
 
     m_model.updateOrAdd(beacon);

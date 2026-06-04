@@ -3,6 +3,7 @@
 #include <QBluetoothDeviceDiscoveryAgent>
 #include <QAbstractListModel>
 #include <QStringListModel>
+#include <QHash>
 #include <QTimer>
 #include "BeaconInfo.h"
 
@@ -77,6 +78,7 @@ class BeaconScanner : public QObject {
     Q_PROPERTY(QStringListModel* logModel READ logModel CONSTANT)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
     Q_PROPERTY(int scanInterval READ scanInterval WRITE setScanInterval NOTIFY scanIntervalChanged)
+    Q_PROPERTY(bool verboseLogging READ verboseLogging WRITE setVerboseLogging NOTIFY verboseLoggingChanged)
 
 public:
     explicit BeaconScanner(QObject *parent = nullptr);
@@ -87,6 +89,8 @@ public:
     QString statusText() const { return m_statusText; }
     int scanInterval() const { return m_restartTimer.interval(); }
     void setScanInterval(int ms);
+    bool verboseLogging() const { return m_verboseLogging; }
+    void setVerboseLogging(bool enabled);
 
     Q_INVOKABLE void startScan();
     Q_INVOKABLE void stopScan();
@@ -97,6 +101,7 @@ signals:
     void scanningChanged();
     void statusTextChanged();
     void scanIntervalChanged();
+    void verboseLoggingChanged();
 
 private:
     void onDeviceDiscovered(const QBluetoothDeviceInfo &info);
@@ -104,6 +109,7 @@ private:
     void parseIBeacon(const QBluetoothDeviceInfo &info, BeaconInfo &beacon);
     void setStatusText(const QString &text);
     void addLog(const QString &text);
+    bool shouldLogBeaconSummary(const QString &address);
     void scheduleRestart();
     void doStartScan();
 #ifdef Q_OS_ANDROID
@@ -122,10 +128,10 @@ private:
     QTimer m_restartTimer;
     bool m_scanning = false;
     bool m_restarting = false;
+    bool m_verboseLogging = false;
+    QHash<QString, QDateTime> m_lastBeaconLogByAddress;
     QString m_statusText;
 };
-
-
 
 
 

@@ -683,6 +683,29 @@ ApplicationWindow {
                                 Layout.preferredWidth: 44
                             }
                         }
+
+                        RowLayout {
+                            spacing: 6
+
+                            CheckBox {
+                                id: verboseLogCheck
+                                text: ""
+                                checked: scanner.verboseLogging
+                                onToggled: scanner.verboseLogging = checked
+                            }
+
+                            Text {
+                                text: "詳細ログを表示する"
+                                color: theme.bodyText
+                                opacity: verboseLogCheck.enabled ? 1.0 : 0.45
+                                verticalAlignment: Text.AlignVCenter
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: verboseLogCheck.toggle()
+                                }
+                            }
+                        }
                     }
                 }
 
