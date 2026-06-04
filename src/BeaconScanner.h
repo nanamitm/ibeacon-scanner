@@ -105,6 +105,7 @@ private:
     void setStatusText(const QString &text);
     void addLog(const QString &text);
     void scheduleRestart();
+    void doStartScan();
 
     QBluetoothDeviceDiscoveryAgent m_agent;
     BeaconModel m_model;

@@ -1,7 +1,9 @@
 #include "BeaconScanner.h"
 #include <QBluetoothDeviceInfo>
 #include <QBluetoothLocalDevice>
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QPermissions>
 #include <QtEndian>
 #include <QDebug>
 #include <QSettings>
@@ -239,6 +241,36 @@ BeaconScanner::BeaconScanner(QObject *parent) : QObject(parent) {
 }
 
 void BeaconScanner::startScan() {
+#ifdef Q_OS_ANDROID
+    // Android 6+ ではランタイム権限のリクエストが必要
+    QBluetoothPermission permission;
+    permission.setCommunicationModes(QBluetoothPermission::Access);
+
+    const auto status = qApp->checkPermission(permission);
+    if (status == Qt::PermissionStatus::Undetermined) {
+        addLog("[Scan] Android: Bluetooth 権限をリクエスト中...");
+        qApp->requestPermission(permission, this, [this](const QPermission &p) {
+            if (p.status() == Qt::PermissionStatus::Granted) {
+                doStartScan();
+            } else {
+                addLog("[Scan] ⚠ Bluetooth 権限が拒否されました");
+                addLog("[Scan]   設定 → アプリ → iBeacon Scanner → 権限 で許可してください");
+                setStatusText("エラー: Bluetooth 権限が必要です");
+            }
+        });
+        return;
+    }
+    if (status == Qt::PermissionStatus::Denied) {
+        addLog("[Scan] ⚠ Bluetooth 権限が拒否されています");
+        addLog("[Scan]   設定 → アプリ → iBeacon Scanner → 権限 で許可してください");
+        setStatusText("エラー: Bluetooth 権限が必要です");
+        return;
+    }
+#endif
+    doStartScan();
+}
+
+void BeaconScanner::doStartScan() {
     m_restarting = false;
     if (m_agent.isActive())
         m_agent.stop();
