@@ -29,7 +29,7 @@ jobs:
           host:     windows
           target:   desktop
           arch:     win64_msvc2022_64
-          modules:  qtbluetooth qtsql
+          modules:  qtbluetooth
           cache:    true
 
       - name: Configure
@@ -70,7 +70,7 @@ jobs:
           host:     linux
           target:   desktop
           arch:     linux_gcc_64
-          modules:  qtbluetooth qtsql
+          modules:  qtbluetooth
           cache:    true
 
       - name: Install system dependencies
@@ -154,7 +154,7 @@ jobs:
           host:     linux
           target:   android
           arch:     android_arm64_v8a
-          modules:  qtbluetooth qtsql
+          modules:  qtbluetooth
           extra:    '--autodesktop'
           cache:    true
 
