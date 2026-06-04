@@ -92,12 +92,6 @@ public:
     Q_INVOKABLE void stopScan();
     Q_INVOKABLE void clearLog();
     void appendLog(const QString &text);
-#ifdef Q_OS_ANDROID
-    // JNI コールバックはフリー関数ラムダから呼ぶため public が必要
-    void onAndroidScanResult(const QString &address, const QString &name,
-                             int rssi, const QByteArray &scanRecord);
-    void onAndroidScanFailed(int errorCode);
-#endif
 
 signals:
     void scanningChanged();
@@ -115,7 +109,11 @@ private:
 #ifdef Q_OS_ANDROID
     void startAndroidScan();
     void stopAndroidScan();
-    void *m_androidScanner = nullptr; // QJniObject*
+    void pollAndroidScan();
+    void onAndroidScanResult(const QString &address, const QString &name,
+                             int rssi, const QByteArray &scanRecord);
+    void *m_androidScanner = nullptr;   // QJniObject*
+    QTimer m_androidPollTimer;
 #endif
 
     QBluetoothDeviceDiscoveryAgent m_agent;

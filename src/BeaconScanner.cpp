@@ -5,7 +5,6 @@
 #include <QDateTime>
 #include <QPermissions>
 #ifdef Q_OS_ANDROID
-#include <QJniEnvironment>
 #include <QJniObject>
 #endif
 #include <QtEndian>
@@ -485,91 +484,63 @@ void BeaconScanner::addLog(const QString &text) {
 // ─────────────────────────────────────────────────────────────────────────────
 #ifdef Q_OS_ANDROID
 
-// JNI コールバック登録テーブル
-static BeaconScanner *g_beaconScanner = nullptr;
-
-// Java → C++ コールバック
-static void jniOnScanResult(JNIEnv *env, jobject /*obj*/,
-                             jlong nativePtr,
-                             jstring jAddress, jstring jName,
-                             jint rssi, jbyteArray jScanRecord)
+// BLE ADV データ TLV から指定 Company ID のメーカーデータを抽出
+static QByteArray extractManufData(const QByteArray &record, quint16 companyId)
 {
-    BeaconScanner *self = reinterpret_cast<BeaconScanner *>(nativePtr);
-    if (!self) return;
-
-    const char *addr = env->GetStringUTFChars(jAddress, nullptr);
-    const char *name = env->GetStringUTFChars(jName, nullptr);
-    QString address = QString::fromUtf8(addr);
-    QString devName = QString::fromUtf8(name);
-    env->ReleaseStringUTFChars(jAddress, addr);
-    env->ReleaseStringUTFChars(jName, name);
-
-    jsize len = env->GetArrayLength(jScanRecord);
-    QByteArray scanRecord(len, Qt::Uninitialized);
-    env->GetByteArrayRegion(jScanRecord, 0, len,
-                            reinterpret_cast<jbyte *>(scanRecord.data()));
-
-    QMetaObject::invokeMethod(self, [self, address, devName, rssi, scanRecord]() {
-        self->onAndroidScanResult(address, devName, rssi, scanRecord);
-    }, Qt::QueuedConnection);
-}
-
-static void jniOnScanFailed(JNIEnv * /*env*/, jobject /*obj*/,
-                             jlong nativePtr, jint errorCode)
-{
-    BeaconScanner *self = reinterpret_cast<BeaconScanner *>(nativePtr);
-    if (!self) return;
-    QMetaObject::invokeMethod(self, [self, errorCode]() {
-        self->onAndroidScanFailed(errorCode);
-    }, Qt::QueuedConnection);
+    for (int i = 0; i + 1 < record.size(); ) {
+        const int length = static_cast<quint8>(record[i]);
+        if (length == 0) break;
+        if (i + length >= record.size()) break;
+        if (static_cast<quint8>(record[i + 1]) == 0xFF && length >= 3) {
+            const quint16 cid = static_cast<quint8>(record[i + 2])
+                              | (static_cast<quint8>(record[i + 3]) << 8);
+            if (cid == companyId)
+                return record.mid(i + 4, length - 3);
+        }
+        i += 1 + length;
+    }
+    return {};
 }
 
 void BeaconScanner::startAndroidScan() {
-    QJniEnvironment jniEnv;
-
-    // ネイティブメソッドを登録
-    static JNINativeMethod methods[] = {
-        { "nativeOnScanResult", "(JLjava/lang/String;Ljava/lang/String;I[B)V",
-          reinterpret_cast<void *>(jniOnScanResult) },
-        { "nativeOnScanFailed", "(JI)V",
-          reinterpret_cast<void *>(jniOnScanFailed) },
-    };
-    jniEnv.registerNativeMethods(
-        "io/github/nanamitm/ibeaconscanner/QtBeaconScanner",
-        methods, 2);
-
-    // QtBeaconScanner インスタンス生成
-    auto *scannerObj = new QJniObject(
-        "io/github/nanamitm/ibeaconscanner/QtBeaconScanner",
-        "(J)V",
-        reinterpret_cast<jlong>(this));
+    auto *scannerObj = new QJniObject("io/github/nanamitm/ibeaconscanner/QtBeaconScanner");
+    if (!scannerObj->isValid()) {
+        addLog("[Scan] ⚠ QtBeaconScanner クラスが見つかりません");
+        delete scannerObj;
+        return;
+    }
     m_androidScanner = scannerObj;
 
-    // Context を取得して startScan() 呼び出し
     QJniObject context = QJniObject::callStaticMethod<QJniObject>(
         "org/qtproject/qt/android/QtNative",
         "getContext",
         "()Landroid/content/Context;");
 
-    bool ok = scannerObj->callMethod<jboolean>(
+    const bool ok = scannerObj->callMethod<jboolean>(
         "startScan",
         "(Landroid/content/Context;)Z",
         context.object());
 
-    if (ok) {
-        addLog("[Scan] Android BLE スキャン開始 (SCAN_MODE_LOW_LATENCY)");
-        m_scanning = true;
-        emit scanningChanged();
-        setStatusText("スキャン中 (Android BLE)...");
-    } else {
+    if (!ok) {
         addLog("[Scan] ⚠ Android BLE スキャン開始失敗");
         setStatusText("エラー: BLEスキャン開始失敗");
         delete scannerObj;
         m_androidScanner = nullptr;
+        return;
     }
+
+    addLog("[Scan] Android BLE スキャン開始 (SCAN_MODE_LOW_LATENCY, ポーリング方式)");
+    m_scanning = true;
+    emit scanningChanged();
+    setStatusText("スキャン中 (Android BLE)...");
+
+    connect(&m_androidPollTimer, &QTimer::timeout, this, &BeaconScanner::pollAndroidScan);
+    m_androidPollTimer.start(100);
 }
 
 void BeaconScanner::stopAndroidScan() {
+    m_androidPollTimer.stop();
+    m_androidPollTimer.disconnect();
     if (m_androidScanner) {
         auto *obj = static_cast<QJniObject *>(m_androidScanner);
         obj->callMethod<void>("stopScan");
@@ -578,35 +549,39 @@ void BeaconScanner::stopAndroidScan() {
     }
 }
 
-// raw BLE スキャンレコードから iBeacon を解析する
-// フォーマット: ... 0xFF [len] [CompanyID L] [CompanyID H] [type] [len] [UUID×16] [Major×2] [Minor×2] [TxPow]
-static QByteArray extractManufData(const QByteArray &record, quint16 companyId)
-{
-    // BLE Advertising Data は可変長 TLV 構造
-    for (int i = 0; i < record.size(); ) {
-        if (i + 1 >= record.size()) break;
-        int length = static_cast<quint8>(record[i]);
-        if (length == 0) break;
-        int type = static_cast<quint8>(record[i + 1]);
-        // type 0xFF = Manufacturer Specific Data
-        if (type == 0xFF && length >= 3) {
-            quint16 cid = static_cast<quint8>(record[i + 2])
-                        | (static_cast<quint8>(record[i + 3]) << 8);
-            if (cid == companyId) {
-                // Company ID の後のデータを返す
-                return record.mid(i + 4, length - 3);
-            }
+void BeaconScanner::pollAndroidScan() {
+    if (!m_androidScanner) return;
+    auto *obj = static_cast<QJniObject *>(m_androidScanner);
+
+    while (true) {
+        QJniObject result = obj->callObjectMethod("poll", "()Ljava/lang/String;");
+        if (!result.isValid()) break;
+        const QString entry = result.toString();
+        if (entry.isNull()) break;
+
+        const QStringList parts = entry.split('\n');
+        if (parts.size() < 4) continue;
+
+        const QString &address = parts[0];
+        const QString &devName = parts[1];
+        const int rssi         = parts[2].toInt();
+        const QByteArray record = QByteArray::fromBase64(parts[3].toLatin1());
+
+        if (address.isEmpty() && devName == "SCAN_FAILED") {
+            addLog(QString("[Scan] ⚠ Android BLE スキャンエラー: code=%1").arg(parts[2]));
+            m_scanning = false;
+            emit scanningChanged();
+            setStatusText(QString("エラー: BLEスキャン失敗(code=%1)").arg(parts[2]));
+            return;
         }
-        i += 1 + length;
+        if (address.isEmpty()) continue;
+        onAndroidScanResult(address, devName, rssi, record);
     }
-    return {};
 }
 
 void BeaconScanner::onAndroidScanResult(const QString &address, const QString &name,
                                         int rssi, const QByteArray &scanRecord)
 {
-    if (address.isEmpty()) return;
-
     BeaconInfo beacon;
     beacon.address  = address;
     beacon.name     = name;
@@ -617,7 +592,6 @@ void BeaconScanner::onAndroidScanResult(const QString &address, const QString &n
            .arg(address).arg(rssi)
            .arg(name.isEmpty() ? "(no name)" : name));
 
-    // raw スキャンレコードから全メーカーデータを抽出してログ出力（診断用）
     bool foundManuf = false;
     for (int i = 0; i + 1 < scanRecord.size(); ) {
         const int length = static_cast<quint8>(scanRecord[i]);
@@ -640,9 +614,6 @@ void BeaconScanner::onAndroidScanResult(const QString &address, const QString &n
         addLog("      ManufacturerData: なし");
 
     const QByteArray appleData = extractManufData(scanRecord, 0x004C);
-
-    // iBeacon 解析
-    // type(1) + iBeacon len(1) + UUID(16) + Major(2) + Minor(2) + TxPow(1) = 23
     if (appleData.size() >= 23
         && static_cast<quint8>(appleData[0]) == 0x02
         && static_cast<quint8>(appleData[1]) == 0x15)
@@ -666,13 +637,6 @@ void BeaconScanner::onAndroidScanResult(const QString &address, const QString &n
     }
 
     m_model.updateOrAdd(beacon);
-}
-
-void BeaconScanner::onAndroidScanFailed(int errorCode) {
-    addLog(QString("[Scan] ⚠ Android BLE スキャンエラー: code=%1").arg(errorCode));
-    m_scanning = false;
-    emit scanningChanged();
-    setStatusText(QString("エラー: BLEスキャン失敗(code=%1)").arg(errorCode));
 }
 
 #endif // Q_OS_ANDROID
