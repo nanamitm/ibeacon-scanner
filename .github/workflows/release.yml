@@ -9,8 +9,9 @@ permissions:
   contents: write
 
 env:
-  QT_VERSION: '6.11.1'
-  APP_NAME:   'iBeaconScanner'
+  QT_VERSION_DESKTOP: '6.9.2'   # aqtinstall で利用可能な最新安定版
+  QT_VERSION_ANDROID: '6.11.1'  # Android は 6.11.1 が利用可能
+  APP_NAME:           'iBeaconScanner'
 
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
@@ -24,7 +25,7 @@ jobs:
       - name: Install Qt (MSVC 2022)
         uses: jurplel/install-qt-action@v4
         with:
-          version:  ${{ env.QT_VERSION }}
+          version:  ${{ env.QT_VERSION_DESKTOP }}
           host:     windows
           target:   desktop
           arch:     win64_msvc2022_64
@@ -65,7 +66,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version:  ${{ env.QT_VERSION }}
+          version:  ${{ env.QT_VERSION_DESKTOP }}
           host:     linux
           target:   desktop
           arch:     linux_gcc_64
@@ -149,7 +150,7 @@ jobs:
       - name: Install Qt (Android arm64-v8a + host)
         uses: jurplel/install-qt-action@v4
         with:
-          version:  ${{ env.QT_VERSION }}
+          version:  ${{ env.QT_VERSION_ANDROID }}
           host:     linux
           target:   android
           arch:     android_arm64_v8a
