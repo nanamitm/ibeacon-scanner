@@ -105,6 +105,39 @@ void LocationHistory::addRecord(const QString &deviceId, const QString &deviceNa
     }
 }
 
+void LocationHistory::importRecord(const QString &deviceId, const QString &deviceName,
+                                   const QString &room, qint64 timestamp) {
+    if (deviceId.isEmpty() || room.isEmpty()) return;
+
+    QSqlQuery q(m_db);
+    // 同一デバイス・同一タイムスタンプのレコードが既に存在する場合はスキップ
+    q.prepare(R"(
+        INSERT INTO location_history (device_id, device_name, room, timestamp)
+        SELECT ?, ?, ?, ?
+        WHERE NOT EXISTS (
+            SELECT 1 FROM location_history WHERE device_id = ? AND timestamp = ?
+        )
+    )");
+    q.addBindValue(deviceId);
+    q.addBindValue(deviceName);
+    q.addBindValue(room);
+    q.addBindValue(timestamp);
+    q.addBindValue(deviceId);
+    q.addBindValue(timestamp);
+    if (!q.exec()) {
+        qWarning() << "importRecord failed:" << q.lastError().text();
+        return;
+    }
+
+    if (q.numRowsAffected() > 0) {
+        const QString display = deviceName.isEmpty() ? deviceId : deviceName;
+        if (!m_knownDevices.contains(display)) {
+            m_knownDevices.append(display);
+            emit knownDevicesChanged();
+        }
+    }
+}
+
 void LocationHistory::search(const QString &deviceName, int rangeIndex) {
     const QDate today = QDate::currentDate();
     QDateTime from, to = QDateTime::currentDateTime();

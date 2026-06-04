@@ -115,7 +115,7 @@ ColumnLayout {
             }
         }
 
-        ScrollBar.vertical: ScrollBar {}
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOff }
 
         Text {
             anchors.centerIn: parent

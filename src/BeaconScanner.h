@@ -9,7 +9,19 @@
 class BeaconModel : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int txPowerOffset READ txPowerOffset WRITE setTxPowerOffset NOTIFY txPowerOffsetChanged)
+    Q_PROPERTY(int sortKey READ sortKey WRITE setSortKey NOTIFY sortKeyChanged)
+    Q_PROPERTY(bool sortDescending READ sortDescending WRITE setSortDescending NOTIFY sortDescendingChanged)
 public:
+    enum SortKey {
+        SortByName     = 0,
+        SortByLastSeen = 1,
+        SortByDistance = 2,
+        SortByRssi     = 3,
+        SortByType     = 4,
+        SortByAddress  = 5,
+        SortByUuid     = 6,
+    };
+
     enum Roles {
         AddressRole = Qt::UserRole + 1,
         NameRole,
@@ -34,15 +46,27 @@ public:
     int txPowerOffset() const { return m_txPowerOffset; }
     void setTxPowerOffset(int offset);
 
+    int sortKey() const { return m_sortKey; }
+    void setSortKey(int key);
+    bool sortDescending() const { return m_sortDescending; }
+    void setSortDescending(bool desc);
+
 signals:
     void txPowerOffsetChanged();
+    void sortKeyChanged();
+    void sortDescendingChanged();
 
 private:
     QString elapsedText(const QDateTime &dateTime) const;
     void refreshElapsedTimes();
+    void sortBeacons();
+    void scheduleSortIfNeeded();
 
     QList<BeaconInfo> m_beacons;
     int m_txPowerOffset = 0;
+    int m_sortKey = SortByLastSeen;
+    bool m_sortDescending = false;
+    bool m_sortPending = false;
     QTimer m_elapsedTimer;
 };
 

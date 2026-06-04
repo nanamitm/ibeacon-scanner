@@ -19,6 +19,22 @@ Rectangle {
     required property real distance
     required property string lastSeen
 
+    property bool macCopied: false
+    property bool uuidCopied: false
+
+    // クリップボードへのコピーに使う非表示 TextEdit
+    // C++ コンテキストプロパティを使わず QML 完結でコピー操作を行う
+    TextEdit {
+        id: clipHelper
+        visible: false
+    }
+
+    function copyText(text) {
+        clipHelper.text = text
+        clipHelper.selectAll()
+        clipHelper.copy()
+    }
+
     height: column.implicitHeight + 16
     color: isIBeacon ? Qt.alpha(theme.accent, theme.dark ? 0.20 : 0.12) : theme.card
     border.color: isIBeacon ? Qt.alpha(theme.accent, theme.dark ? 0.70 : 0.60) : theme.border
@@ -50,7 +66,6 @@ Rectangle {
             Text {
                 text: rssi + " dBm"
                 font.pixelSize: 12
-                // 電波強度は意味のある色分けなので維持
                 color: rssi > -70 ? theme.success : rssi > -90 ? theme.warning : theme.danger
             }
         }
@@ -110,7 +125,80 @@ Rectangle {
                 color: theme.placeholderText
             }
         }
+
+        // コピーチップ行
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 4
+
+            Item { Layout.fillWidth: true }
+
+            // UUID コピー（iBeaconのみ）
+            Rectangle {
+                visible: isIBeacon
+                implicitWidth: uuidChipLabel.implicitWidth + 16
+                implicitHeight: 22
+                radius: 4
+                color: uuidCopied ? Qt.alpha(theme.success, 0.18) : Qt.alpha(theme.accent, theme.dark ? 0.18 : 0.10)
+                border.color: uuidCopied ? theme.success : Qt.alpha(theme.accent, 0.5)
+                border.width: 1
+
+                Text {
+                    id: uuidChipLabel
+                    anchors.centerIn: parent
+                    text: uuidCopied ? "UUID コピー済み ✓" : "UUID コピー"
+                    font.pixelSize: 10
+                    color: uuidCopied ? theme.success : theme.accentText
+                }
+
+                Timer {
+                    id: uuidResetTimer
+                    interval: 1500
+                    onTriggered: root.uuidCopied = false
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        root.copyText(root.uuid)
+                        root.uuidCopied = true
+                        uuidResetTimer.restart()
+                    }
+                }
+            }
+
+            // MAC コピー（全デバイス）
+            Rectangle {
+                implicitWidth: macChipLabel.implicitWidth + 16
+                implicitHeight: 22
+                radius: 4
+                color: macCopied ? Qt.alpha(theme.success, 0.18) : Qt.alpha(theme.accent, theme.dark ? 0.18 : 0.10)
+                border.color: macCopied ? theme.success : Qt.alpha(theme.accent, 0.5)
+                border.width: 1
+
+                Text {
+                    id: macChipLabel
+                    anchors.centerIn: parent
+                    text: macCopied ? "MAC コピー済み ✓" : "MAC コピー"
+                    font.pixelSize: 10
+                    color: macCopied ? theme.success : theme.accentText
+                }
+
+                Timer {
+                    id: macResetTimer
+                    interval: 1500
+                    onTriggered: root.macCopied = false
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        root.copyText(root.address)
+                        root.macCopied = true
+                        macResetTimer.restart()
+                    }
+                }
+            }
+        }
     }
 }
-
-

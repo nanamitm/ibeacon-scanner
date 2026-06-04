@@ -10,7 +10,10 @@
 // --- BeaconModel ---
 
 BeaconModel::BeaconModel(QObject *parent) : QAbstractListModel(parent) {
-    m_txPowerOffset = QSettings().value("beacon/txPowerOffset", 0).toInt();
+    QSettings s;
+    m_txPowerOffset  = s.value("beacon/txPowerOffset",  0).toInt();
+    m_sortKey        = s.value("beacon/sortKey",        SortByLastSeen).toInt();
+    m_sortDescending = s.value("beacon/sortDescending", false).toBool();
     m_elapsedTimer.setInterval(1000);
     connect(&m_elapsedTimer, &QTimer::timeout, this, &BeaconModel::refreshElapsedTimes);
     m_elapsedTimer.start();
@@ -57,12 +60,96 @@ void BeaconModel::updateOrAdd(const BeaconInfo &info) {
         if (m_beacons[i].address == info.address) {
             m_beacons[i] = info;
             emit dataChanged(index(i), index(i));
+            scheduleSortIfNeeded();
             return;
         }
     }
     beginInsertRows({}, m_beacons.size(), m_beacons.size());
     m_beacons.append(info);
     endInsertRows();
+    scheduleSortIfNeeded();
+}
+
+void BeaconModel::scheduleSortIfNeeded() {
+    if (m_sortPending || m_beacons.size() < 2) return;
+    m_sortPending = true;
+    QTimer::singleShot(0, this, &BeaconModel::sortBeacons);
+}
+
+void BeaconModel::sortBeacons() {
+    m_sortPending = false;
+    if (m_beacons.size() < 2) return;
+    beginResetModel();
+    switch (m_sortKey) {
+    case SortByName:
+        std::sort(m_beacons.begin(), m_beacons.end(), [](const BeaconInfo &a, const BeaconInfo &b) {
+            if (a.name.isEmpty() && b.name.isEmpty()) return false;
+            if (a.name.isEmpty()) return false;
+            if (b.name.isEmpty()) return true;
+            return a.name.toLower() < b.name.toLower();
+        });
+        break;
+    case SortByLastSeen:
+        std::sort(m_beacons.begin(), m_beacons.end(), [](const BeaconInfo &a, const BeaconInfo &b) {
+            return a.lastSeen > b.lastSeen; // 最新が先頭
+        });
+        break;
+    case SortByDistance:
+        std::sort(m_beacons.begin(), m_beacons.end(), [this](const BeaconInfo &a, const BeaconInfo &b) {
+            const double da = a.estimatedDistance(m_txPowerOffset);
+            const double db = b.estimatedDistance(m_txPowerOffset);
+            if (da < 0) return false;
+            if (db < 0) return true;
+            return da < db;
+        });
+        break;
+    case SortByRssi:
+        // 信号が強い順（RSSIが大きい＝0に近い順）
+        std::sort(m_beacons.begin(), m_beacons.end(), [](const BeaconInfo &a, const BeaconInfo &b) {
+            return a.rssi > b.rssi;
+        });
+        break;
+    case SortByType:
+        // iBeacon先頭、同種内はアドレス順
+        std::sort(m_beacons.begin(), m_beacons.end(), [](const BeaconInfo &a, const BeaconInfo &b) {
+            if (a.isIBeacon() != b.isIBeacon()) return a.isIBeacon();
+            return a.address < b.address;
+        });
+        break;
+    case SortByAddress:
+        std::sort(m_beacons.begin(), m_beacons.end(), [](const BeaconInfo &a, const BeaconInfo &b) {
+            return a.address < b.address;
+        });
+        break;
+    case SortByUuid:
+        // UUID昇順、非iBeaconは末尾
+        std::sort(m_beacons.begin(), m_beacons.end(), [](const BeaconInfo &a, const BeaconInfo &b) {
+            if (a.uuid.isEmpty() && b.uuid.isEmpty()) return false;
+            if (a.uuid.isEmpty()) return false;
+            if (b.uuid.isEmpty()) return true;
+            return a.uuid < b.uuid;
+        });
+        break;
+    }
+    if (m_sortDescending)
+        std::reverse(m_beacons.begin(), m_beacons.end());
+    endResetModel();
+}
+
+void BeaconModel::setSortDescending(bool desc) {
+    if (m_sortDescending == desc) return;
+    m_sortDescending = desc;
+    QSettings().setValue("beacon/sortDescending", desc);
+    emit sortDescendingChanged();
+    sortBeacons();
+}
+
+void BeaconModel::setSortKey(int key) {
+    if (m_sortKey == key) return;
+    m_sortKey = key;
+    QSettings().setValue("beacon/sortKey", key);
+    emit sortKeyChanged();
+    sortBeacons();
 }
 
 void BeaconModel::clear() {
@@ -103,8 +190,11 @@ void BeaconModel::setTxPowerOffset(int offset) {
     m_txPowerOffset = offset;
     QSettings().setValue("beacon/txPowerOffset", offset);
     emit txPowerOffsetChanged();
-    if (!m_beacons.isEmpty())
+    if (!m_beacons.isEmpty()) {
         emit dataChanged(index(0), index(m_beacons.size() - 1), {DistanceRole});
+        if (m_sortKey == SortByDistance)
+            sortBeacons();
+    }
 }
 
 // --- BeaconScanner ---

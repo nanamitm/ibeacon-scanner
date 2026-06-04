@@ -88,11 +88,65 @@ ApplicationWindow {
             ColumnLayout {
                 spacing: 4
 
-                Text {
-                    text: listView.count + " デバイス検出"
-                    font.pixelSize: 12
-                    color: theme.placeholderText
-                    Layout.alignment: Qt.AlignRight
+                // ソートボタン + デバイス数
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Rectangle {
+                        id: sortBtn
+                        implicitHeight: 28
+                        implicitWidth: sortBtnLabel.implicitWidth + 20
+                        radius: 4
+                        color: sortBtnMouse.pressed ? theme.buttonPressed : theme.button
+                        border.color: theme.buttonBorder
+                        border.width: 1
+
+                        Text {
+                            id: sortBtnLabel
+                            anchors.centerIn: parent
+                            font.pixelSize: 12
+                            color: theme.buttonText
+                            text: {
+                                const names = ["名前", "検出時間", "距離",
+                                               "RSSI", "種別", "MAC", "UUID"]
+                                const k = beaconModel.sortKey
+                                return "ソート: " + (k < names.length ? names[k] : "?")
+                                       + "  " + (beaconModel.sortDescending ? "↓" : "↑")
+                            }
+                        }
+
+                        MouseArea {
+                            id: sortBtnMouse
+                            anchors.fill: parent
+                            onClicked: sortMenu.popup()
+                        }
+
+                        Menu {
+                            id: sortMenu
+
+                            MenuItem { text: "名前";          checkable: true; checked: beaconModel.sortKey === 0; onTriggered: beaconModel.sortKey = 0 }
+                            MenuItem { text: "検出時間";       checkable: true; checked: beaconModel.sortKey === 1; onTriggered: beaconModel.sortKey = 1 }
+                            MenuItem { text: "距離";          checkable: true; checked: beaconModel.sortKey === 2; onTriggered: beaconModel.sortKey = 2 }
+                            MenuItem { text: "RSSI";          checkable: true; checked: beaconModel.sortKey === 3; onTriggered: beaconModel.sortKey = 3 }
+                            MenuItem { text: "種別 (iBeacon優先)"; checkable: true; checked: beaconModel.sortKey === 4; onTriggered: beaconModel.sortKey = 4 }
+                            MenuItem { text: "MACアドレス";   checkable: true; checked: beaconModel.sortKey === 5; onTriggered: beaconModel.sortKey = 5 }
+                            MenuItem { text: "UUID";          checkable: true; checked: beaconModel.sortKey === 6; onTriggered: beaconModel.sortKey = 6 }
+
+                            MenuSeparator {}
+
+                            MenuItem { text: "↑ 昇順"; checkable: true; checked: !beaconModel.sortDescending; onTriggered: beaconModel.sortDescending = false }
+                            MenuItem { text: "↓ 降順"; checkable: true; checked: beaconModel.sortDescending;  onTriggered: beaconModel.sortDescending = true  }
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Text {
+                        text: listView.count + " デバイス検出"
+                        font.pixelSize: 12
+                        color: theme.placeholderText
+                    }
                 }
 
                 ListView {
@@ -275,6 +329,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Text { text: "URL:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 70 }
                             TextField {
+                                id: mqttUrlField
                                 text: mqtt.brokerUrl
                                 Layout.fillWidth: true
                                 placeholderText: "mqtt://192.168.1.x:1883"
@@ -340,8 +395,14 @@ ApplicationWindow {
                                 MouseArea {
                                     id: mqttConnectMouse
                                     anchors.fill: parent
-                                    onClicked: mqtt.connected ? mqtt.disconnectBroker()
-                                                              : mqtt.connectBroker()
+                                    onClicked: {
+                                        if (mqtt.connected) {
+                                            mqtt.disconnectBroker()
+                                        } else {
+                                            mqtt.brokerUrl = mqttUrlField.text
+                                            mqtt.connectBroker()
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -400,6 +461,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Text { text: "URL:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 70 }
                             TextField {
+                                id: haUrlField
                                 text: ha.serverUrl
                                 Layout.fillWidth: true
                                 placeholderText: "http://homeassistant.local:8123"
@@ -411,6 +473,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Text { text: "トークン:"; font.pixelSize: 13; color: theme.bodyText; Layout.preferredWidth: 70 }
                             TextField {
+                                id: haTokenField
                                 text: ha.accessToken
                                 Layout.fillWidth: true
                                 placeholderText: "Long-Lived Access Token"
@@ -475,8 +538,15 @@ ApplicationWindow {
                                 MouseArea {
                                     id: haConnectMouse
                                     anchors.fill: parent
-                                    onClicked: ha.connected ? ha.disconnectServer()
-                                                            : ha.connectServer()
+                                    onClicked: {
+                                        if (ha.connected) {
+                                            ha.disconnectServer()
+                                        } else {
+                                            ha.serverUrl = haUrlField.text
+                                            ha.accessToken = haTokenField.text
+                                            ha.connectServer()
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -500,6 +570,59 @@ ApplicationWindow {
                                 MouseArea {
                                     anchors.fill: parent
                                     onClicked: haAutoConnectCheck.toggle()
+                                }
+                            }
+                        }
+
+                        // 過去履歴インポート
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "過去履歴:"
+                                font.pixelSize: 13
+                                color: theme.bodyText
+                                Layout.preferredWidth: 70
+                            }
+
+                            ComboBox {
+                                id: importDaysCombo
+                                model: ["7日", "30日", "90日"]
+                                Layout.preferredWidth: 80
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 34
+                                radius: 6
+                                border.width: 1
+                                border.color: ha.importing ? theme.border : theme.buttonBorder
+                                color: ha.importing ? theme.button
+                                     : importMouse.pressed ? theme.buttonPressed : theme.button
+                                opacity: ha.importing ? 0.6 : 1.0
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: ha.importing ? "キャンセル" : "インポート"
+                                    color: ha.importing ? theme.danger : theme.buttonText
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    id: importMouse
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (ha.importing) {
+                                            ha.cancelImport()
+                                        } else {
+                                            ha.serverUrl = haUrlField.text
+                                            ha.accessToken = haTokenField.text
+                                            const days = [7, 30, 90][importDaysCombo.currentIndex]
+                                            ha.importHistory(days)
+                                        }
+                                    }
                                 }
                             }
                         }

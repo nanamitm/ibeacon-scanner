@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 6.10 REQUIRED COMPONENTS
     Core
+    Concurrent
     Gui
     Quick
     QuickControls2
@@ -51,6 +52,7 @@ qt_add_qml_module(ibeacon-scanner
 
 target_link_libraries(ibeacon-scanner PRIVATE
     Qt6::Core
+    Qt6::Concurrent
     Qt6::Gui
     Qt6::Quick
     Qt6::QuickControls2

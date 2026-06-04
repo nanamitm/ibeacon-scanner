@@ -39,6 +39,8 @@ public:
     int resultCount() const { return m_resultCount; }
 
     void addRecord(const QString &deviceId, const QString &deviceName, const QString &room);
+    void importRecord(const QString &deviceId, const QString &deviceName,
+                      const QString &room, qint64 timestamp);
 
     // rangeIndex: 0=今日 1=昨日 2=今週 3=全期間
     Q_INVOKABLE void search(const QString &deviceName, int rangeIndex);
