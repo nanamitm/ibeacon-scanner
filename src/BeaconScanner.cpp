@@ -617,16 +617,33 @@ void BeaconScanner::onAndroidScanResult(const QString &address, const QString &n
            .arg(address).arg(rssi)
            .arg(name.isEmpty() ? "(no name)" : name));
 
-    // raw スキャンレコードからメーカーデータを抽出してログ出力
-    const QByteArray appleData = extractManufData(scanRecord, 0x004C);
-    if (!appleData.isEmpty()) {
-        addLog(QString("      ManufData[0x004c]: %1 bytes = %2")
-               .arg(appleData.size())
-               .arg(QString(appleData.toHex(' '))));
+    // raw スキャンレコードから全メーカーデータを抽出してログ出力（診断用）
+    bool foundManuf = false;
+    for (int i = 0; i + 1 < scanRecord.size(); ) {
+        const int length = static_cast<quint8>(scanRecord[i]);
+        if (length == 0) break;
+        if (i + length >= scanRecord.size()) break;
+        const int type = static_cast<quint8>(scanRecord[i + 1]);
+        if (type == 0xFF && length >= 3) {
+            const quint16 cid = static_cast<quint8>(scanRecord[i + 2])
+                              | (static_cast<quint8>(scanRecord[i + 3]) << 8);
+            const QByteArray d = scanRecord.mid(i + 2, length - 1);
+            addLog(QString("      ManufData[0x%1]: %2 bytes = %3")
+                   .arg(cid, 4, 16, QLatin1Char('0'))
+                   .arg(d.size())
+                   .arg(QString(d.toHex(' '))));
+            foundManuf = true;
+        }
+        i += 1 + length;
     }
+    if (!foundManuf)
+        addLog("      ManufacturerData: なし");
+
+    const QByteArray appleData = extractManufData(scanRecord, 0x004C);
 
     // iBeacon 解析
-    if (appleData.size() >= 21
+    // type(1) + iBeacon len(1) + UUID(16) + Major(2) + Minor(2) + TxPow(1) = 23
+    if (appleData.size() >= 23
         && static_cast<quint8>(appleData[0]) == 0x02
         && static_cast<quint8>(appleData[1]) == 0x15)
     {
