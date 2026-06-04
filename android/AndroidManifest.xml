@@ -1,12 +1,18 @@
 <?xml version="1.0"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="org.qtproject.example"
     android:installLocation="auto"
     android:versionCode="-- %%INSERT_VERSION_CODE%% --"
     android:versionName="-- %%INSERT_VERSION_NAME%% --">
     <!-- %%INSERT_PERMISSIONS -->
     <!-- %%INSERT_FEATURES -->
-    <!-- Android 12+ でも位置情報権限を宣言: BLUETOOTH_SCAN の neverForLocation 制約を解除してデバイス名を取得する -->
+    <!-- iBeacon は位置推定に使える BLE beacon なので neverForLocation を付けない -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:minSdkVersion="31"
+        tools:node="replace" />
+    <!-- Android 12+ でも位置情報権限を宣言: BLE beacon が scan result から除外されるのを避ける -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <supports-screens
         android:anyDensity="true"
