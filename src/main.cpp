@@ -11,7 +11,11 @@
 
 int main(int argc, char *argv[]) {
     QGuiApplication::setDesktopSettingsAware(true);
+#ifdef Q_OS_ANDROID
+    QQuickStyle::setStyle("Material");
+#else
     QQuickStyle::setStyle("Windows");
+#endif
 
     QGuiApplication app(argc, argv);
     app.setOrganizationName("ibeacon-scanner");
