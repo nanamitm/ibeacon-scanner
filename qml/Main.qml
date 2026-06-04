@@ -319,12 +319,30 @@ ApplicationWindow {
                                 Layout.minimumWidth: 80
                                 elide: Text.ElideRight
                             }
-                            Button {
-                                text: mqtt.connected ? "切断" : "接続"
+                            Rectangle {
+                                id: mqttConnectButton
                                 Layout.preferredWidth: 88
                                 Layout.minimumWidth: 88
-                                onClicked: mqtt.connected ? mqtt.disconnectBroker()
-                                                          : mqtt.connectBroker()
+                                Layout.preferredHeight: 34
+                                radius: 6
+                                border.width: 1
+                                border.color: theme.buttonBorder
+                                color: mqttConnectMouse.pressed ? theme.buttonPressed : theme.button
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: mqtt.connected ? "切断" : "接続"
+                                    color: theme.buttonText
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    id: mqttConnectMouse
+                                    anchors.fill: parent
+                                    onClicked: mqtt.connected ? mqtt.disconnectBroker()
+                                                              : mqtt.connectBroker()
+                                }
                             }
                         }
 
@@ -436,12 +454,30 @@ ApplicationWindow {
                                 Layout.minimumWidth: 80
                                 elide: Text.ElideRight
                             }
-                            Button {
-                                text: ha.connected ? "停止" : "接続"
+                            Rectangle {
+                                id: haConnectButton
                                 Layout.preferredWidth: 88
                                 Layout.minimumWidth: 88
-                                onClicked: ha.connected ? ha.disconnectServer()
-                                                        : ha.connectServer()
+                                Layout.preferredHeight: 34
+                                radius: 6
+                                border.width: 1
+                                border.color: theme.buttonBorder
+                                color: haConnectMouse.pressed ? theme.buttonPressed : theme.button
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: ha.connected ? "停止" : "接続"
+                                    color: theme.buttonText
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    id: haConnectMouse
+                                    anchors.fill: parent
+                                    onClicked: ha.connected ? ha.disconnectServer()
+                                                            : ha.connectServer()
+                                }
                             }
                         }
 

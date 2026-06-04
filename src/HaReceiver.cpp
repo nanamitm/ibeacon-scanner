@@ -7,6 +7,7 @@
 #include <QNetworkRequest>
 #include <QSettings>
 #include <QUrl>
+#include <QJsonParseError>
 
 namespace {
 constexpr int MinPollIntervalMs = 5000;
@@ -14,6 +15,8 @@ constexpr int MaxPollIntervalMs = 60000;
 
 QString trimmedUrl(QString url) {
     url = url.trimmed();
+    if (!url.isEmpty() && !url.contains("://"))
+        url.prepend("http://");
     while (url.endsWith('/'))
         url.chop(1);
     return url;
@@ -74,7 +77,7 @@ void HaReceiver::setPollInterval(int ms) {
 
 void HaReceiver::connectServer() {
     if (m_serverUrl.isEmpty()) {
-        addLog("[HA] ホストが未入力です");
+        addLog("[HA] URLが未入力です");
         setStatusText("URLを入力してください");
         return;
     }
@@ -90,6 +93,8 @@ void HaReceiver::connectServer() {
     }
 
     addLog("[HA] Bermuda連携を開始: " + m_serverUrl);
+    addLog(QString("[HA] API: %1").arg(statesUrl().toString()));
+    addLog(QString("[HA] Token: %1文字").arg(m_accessToken.size()));
     setStatusText("接続中...");
     m_pollTimer.start();
     fetchStates();
@@ -111,27 +116,36 @@ QUrl HaReceiver::statesUrl() const {
 }
 
 void HaReceiver::fetchStates() {
-    if (m_serverUrl.isEmpty() || m_accessToken.isEmpty()) return;
+    if (m_serverUrl.isEmpty() || m_accessToken.isEmpty()) {
+        addLog("[HA] API取得をスキップ: URLまたはトークンが未設定");
+        return;
+    }
 
     QNetworkRequest request(statesUrl());
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setRawHeader("Accept", "application/json");
     request.setRawHeader("Authorization", "Bearer " + m_accessToken.toUtf8());
+    addLog(QString("[HA] GET %1").arg(request.url().toString()));
     m_network.get(request);
 }
 
 void HaReceiver::onReplyFinished(QNetworkReply *reply) {
     reply->deleteLater();
 
+    const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray payload = reply->readAll();
+    addLog(QString("[HA] 応答: HTTP %1, %2 bytes").arg(httpStatus).arg(payload.size()));
+
     if (reply->error() != QNetworkReply::NoError) {
         setConnected(false);
         const QString message = reply->errorString();
-        addLog("[HA] エラー: " + message);
+        addLog(QString("[HA] エラー: %1 (%2)").arg(message).arg(static_cast<int>(reply->error())));
+        if (!payload.isEmpty())
+            addLog("[HA] 応答本文: " + QString::fromUtf8(payload.left(240)));
         setStatusText("エラー: " + message);
         return;
     }
 
-    const QByteArray payload = reply->readAll();
     processStates(payload);
     if (!m_connected) {
         addLog("[HA] Home Assistant 接続確認");
@@ -141,12 +155,21 @@ void HaReceiver::onReplyFinished(QNetworkReply *reply) {
 }
 
 void HaReceiver::processStates(const QByteArray &payload) {
-    const QJsonDocument doc = QJsonDocument::fromJson(payload);
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(payload, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        addLog(QString("[HA] JSON解析エラー: %1 at offset %2")
+                   .arg(parseError.errorString())
+                   .arg(parseError.offset));
+        addLog("[HA] 応答先頭: " + QString::fromUtf8(payload.left(240)));
+        return;
+    }
     if (!doc.isArray()) {
         addLog("[HA] /api/states の応答をJSON配列として読めませんでした");
         return;
     }
 
+    addLog(QString("[HA] state数: %1").arg(doc.array().size()));
     int matched = 0;
     for (const QJsonValue &value : doc.array()) {
         const QJsonObject stateObject = value.toObject();
@@ -181,6 +204,7 @@ void HaReceiver::processStates(const QByteArray &payload) {
         emit deviceLocationUpdated(deviceId, deviceName, room, -1.0);
     }
 
+    addLog(QString("[HA] Bermuda Area候補: %1").arg(matched));
     if (matched == 0)
         addLog("[HA] BermudaのAreaセンサーは見つかりませんでした");
 }
