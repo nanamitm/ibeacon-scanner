@@ -4,6 +4,10 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QPermissions>
+#ifdef Q_OS_ANDROID
+#include <QJniEnvironment>
+#include <QJniObject>
+#endif
 #include <QtEndian>
 #include <QDebug>
 #include <QSettings>
@@ -288,9 +292,15 @@ void BeaconScanner::startScan() {
 
 void BeaconScanner::doStartScan() {
     m_restarting = false;
+    m_model.clear();
+
+#ifdef Q_OS_ANDROID
+    startAndroidScan();
+    return;
+#endif
+
     if (m_agent.isActive())
         m_agent.stop();
-    m_model.clear();
 
     // サポートされているメソッドを確認してログ出力（初回のみ）
     const auto supported = QBluetoothDeviceDiscoveryAgent::supportedDiscoveryMethods();
@@ -325,8 +335,12 @@ void BeaconScanner::stopScan() {
     m_scanning = false;
     emit scanningChanged();
     addLog("[Scan] スキャン停止");
+#ifdef Q_OS_ANDROID
+    stopAndroidScan();
+#else
     if (m_agent.isActive())
         m_agent.stop();
+#endif
     setStatusText("停止");
 }
 
@@ -463,6 +477,188 @@ void BeaconScanner::addLog(const QString &text) {
     if (list.size() > 200) list.removeFirst(); // 最大200行
     m_logModel.setStringList(list);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Android: BluetoothLeScanner JNI 実装
+// Qt の QBluetoothDeviceDiscoveryAgent は non-connectable BLE (iBeacon 等)を
+// Android で検出できないため、直接 BluetoothLeScanner を使用する
+// ─────────────────────────────────────────────────────────────────────────────
+#ifdef Q_OS_ANDROID
+
+// JNI コールバック登録テーブル
+static BeaconScanner *g_beaconScanner = nullptr;
+
+// Java → C++ コールバック
+static void jniOnScanResult(JNIEnv *env, jobject /*obj*/,
+                             jlong nativePtr,
+                             jstring jAddress, jstring jName,
+                             jint rssi, jbyteArray jScanRecord)
+{
+    BeaconScanner *self = reinterpret_cast<BeaconScanner *>(nativePtr);
+    if (!self) return;
+
+    const char *addr = env->GetStringUTFChars(jAddress, nullptr);
+    const char *name = env->GetStringUTFChars(jName, nullptr);
+    QString address = QString::fromUtf8(addr);
+    QString devName = QString::fromUtf8(name);
+    env->ReleaseStringUTFChars(jAddress, addr);
+    env->ReleaseStringUTFChars(jName, name);
+
+    jsize len = env->GetArrayLength(jScanRecord);
+    QByteArray scanRecord(len, Qt::Uninitialized);
+    env->GetByteArrayRegion(jScanRecord, 0, len,
+                            reinterpret_cast<jbyte *>(scanRecord.data()));
+
+    QMetaObject::invokeMethod(self, [self, address, devName, rssi, scanRecord]() {
+        self->onAndroidScanResult(address, devName, rssi, scanRecord);
+    }, Qt::QueuedConnection);
+}
+
+static void jniOnScanFailed(JNIEnv * /*env*/, jobject /*obj*/,
+                             jlong nativePtr, jint errorCode)
+{
+    BeaconScanner *self = reinterpret_cast<BeaconScanner *>(nativePtr);
+    if (!self) return;
+    QMetaObject::invokeMethod(self, [self, errorCode]() {
+        self->onAndroidScanFailed(errorCode);
+    }, Qt::QueuedConnection);
+}
+
+void BeaconScanner::startAndroidScan() {
+    QJniEnvironment jniEnv;
+
+    // ネイティブメソッドを登録
+    static JNINativeMethod methods[] = {
+        { "nativeOnScanResult", "(JLjava/lang/String;Ljava/lang/String;I[B)V",
+          reinterpret_cast<void *>(jniOnScanResult) },
+        { "nativeOnScanFailed", "(JI)V",
+          reinterpret_cast<void *>(jniOnScanFailed) },
+    };
+    jniEnv.registerNativeMethods(
+        "io/github/nanamitm/ibeaconscanner/QtBeaconScanner",
+        methods, 2);
+
+    // QtBeaconScanner インスタンス生成
+    auto *scannerObj = new QJniObject(
+        "io/github/nanamitm/ibeaconscanner/QtBeaconScanner",
+        "(J)V",
+        reinterpret_cast<jlong>(this));
+    m_androidScanner = scannerObj;
+
+    // Context を取得して startScan() 呼び出し
+    QJniObject context = QJniObject::callStaticMethod<QJniObject>(
+        "org/qtproject/qt/android/QtNative",
+        "getContext",
+        "()Landroid/content/Context;");
+
+    bool ok = scannerObj->callMethod<jboolean>(
+        "startScan",
+        "(Landroid/content/Context;)Z",
+        context.object());
+
+    if (ok) {
+        addLog("[Scan] Android BLE スキャン開始 (SCAN_MODE_LOW_LATENCY)");
+        m_scanning = true;
+        emit scanningChanged();
+        setStatusText("スキャン中 (Android BLE)...");
+    } else {
+        addLog("[Scan] ⚠ Android BLE スキャン開始失敗");
+        setStatusText("エラー: BLEスキャン開始失敗");
+        delete scannerObj;
+        m_androidScanner = nullptr;
+    }
+}
+
+void BeaconScanner::stopAndroidScan() {
+    if (m_androidScanner) {
+        auto *obj = static_cast<QJniObject *>(m_androidScanner);
+        obj->callMethod<void>("stopScan");
+        delete obj;
+        m_androidScanner = nullptr;
+    }
+}
+
+// raw BLE スキャンレコードから iBeacon を解析する
+// フォーマット: ... 0xFF [len] [CompanyID L] [CompanyID H] [type] [len] [UUID×16] [Major×2] [Minor×2] [TxPow]
+static QByteArray extractManufData(const QByteArray &record, quint16 companyId)
+{
+    // BLE Advertising Data は可変長 TLV 構造
+    for (int i = 0; i < record.size(); ) {
+        if (i + 1 >= record.size()) break;
+        int length = static_cast<quint8>(record[i]);
+        if (length == 0) break;
+        int type = static_cast<quint8>(record[i + 1]);
+        // type 0xFF = Manufacturer Specific Data
+        if (type == 0xFF && length >= 3) {
+            quint16 cid = static_cast<quint8>(record[i + 2])
+                        | (static_cast<quint8>(record[i + 3]) << 8);
+            if (cid == companyId) {
+                // Company ID の後のデータを返す
+                return record.mid(i + 4, length - 3);
+            }
+        }
+        i += 1 + length;
+    }
+    return {};
+}
+
+void BeaconScanner::onAndroidScanResult(const QString &address, const QString &name,
+                                        int rssi, const QByteArray &scanRecord)
+{
+    if (address.isEmpty()) return;
+
+    BeaconInfo beacon;
+    beacon.address  = address;
+    beacon.name     = name;
+    beacon.rssi     = rssi;
+    beacon.lastSeen = QDateTime::currentDateTime();
+
+    addLog(QString("[Dev] %1 | BLE | RSSI:%2 | %3")
+           .arg(address).arg(rssi)
+           .arg(name.isEmpty() ? "(no name)" : name));
+
+    // raw スキャンレコードからメーカーデータを抽出してログ出力
+    const QByteArray appleData = extractManufData(scanRecord, 0x004C);
+    if (!appleData.isEmpty()) {
+        addLog(QString("      ManufData[0x004c]: %1 bytes = %2")
+               .arg(appleData.size())
+               .arg(QString(appleData.toHex(' '))));
+    }
+
+    // iBeacon 解析
+    if (appleData.size() >= 21
+        && static_cast<quint8>(appleData[0]) == 0x02
+        && static_cast<quint8>(appleData[1]) == 0x15)
+    {
+        const quint8 *p = reinterpret_cast<const quint8 *>(appleData.constData()) + 2;
+        beacon.uuid = QString("%1%2%3%4-%5%6-%7%8-%9%10-%11%12%13%14%15%16")
+            .arg(p[0],2,16,QLatin1Char('0')).arg(p[1],2,16,QLatin1Char('0'))
+            .arg(p[2],2,16,QLatin1Char('0')).arg(p[3],2,16,QLatin1Char('0'))
+            .arg(p[4],2,16,QLatin1Char('0')).arg(p[5],2,16,QLatin1Char('0'))
+            .arg(p[6],2,16,QLatin1Char('0')).arg(p[7],2,16,QLatin1Char('0'))
+            .arg(p[8],2,16,QLatin1Char('0')).arg(p[9],2,16,QLatin1Char('0'))
+            .arg(p[10],2,16,QLatin1Char('0')).arg(p[11],2,16,QLatin1Char('0'))
+            .arg(p[12],2,16,QLatin1Char('0')).arg(p[13],2,16,QLatin1Char('0'))
+            .arg(p[14],2,16,QLatin1Char('0')).arg(p[15],2,16,QLatin1Char('0'))
+            .toUpper();
+        beacon.major   = qFromBigEndian<quint16>(appleData.constData() + 18);
+        beacon.minor   = qFromBigEndian<quint16>(appleData.constData() + 20);
+        beacon.txPower = static_cast<qint8>(appleData[22]);
+        addLog(QString("      → iBeacon! UUID:%1 Maj:%2 Min:%3 TxPow:%4")
+               .arg(beacon.uuid).arg(beacon.major).arg(beacon.minor).arg(beacon.txPower));
+    }
+
+    m_model.updateOrAdd(beacon);
+}
+
+void BeaconScanner::onAndroidScanFailed(int errorCode) {
+    addLog(QString("[Scan] ⚠ Android BLE スキャンエラー: code=%1").arg(errorCode));
+    m_scanning = false;
+    emit scanningChanged();
+    setStatusText(QString("エラー: BLEスキャン失敗(code=%1)").arg(errorCode));
+}
+
+#endif // Q_OS_ANDROID
 
 
 

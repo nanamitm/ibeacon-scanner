@@ -107,6 +107,16 @@ private:
     void scheduleRestart();
     void doStartScan();
 
+#ifdef Q_OS_ANDROID
+    void startAndroidScan();
+    void stopAndroidScan();
+    // JNI コールバック (Java → C++)
+    void onAndroidScanResult(const QString &address, const QString &name,
+                             int rssi, const QByteArray &scanRecord);
+    void onAndroidScanFailed(int errorCode);
+    void *m_androidScanner = nullptr; // QJniObject*
+#endif
+
     QBluetoothDeviceDiscoveryAgent m_agent;
     BeaconModel m_model;
     QStringListModel m_logModel;
