@@ -242,17 +242,16 @@ BeaconScanner::BeaconScanner(QObject *parent) : QObject(parent) {
 
 void BeaconScanner::startScan() {
 #ifdef Q_OS_ANDROID
-    // Android 6+ ではランタイム権限のリクエストが必要
-    QBluetoothPermission permission;
-    permission.setCommunicationModes(QBluetoothPermission::Access);
+    // 1. Bluetooth 権限チェック
+    QBluetoothPermission btPerm;
+    btPerm.setCommunicationModes(QBluetoothPermission::Access);
 
-    const auto status = qApp->checkPermission(permission);
-    if (status == Qt::PermissionStatus::Undetermined) {
+    if (qApp->checkPermission(btPerm) == Qt::PermissionStatus::Undetermined) {
         addLog("[Scan] Android: Bluetooth 権限をリクエスト中...");
-        qApp->requestPermission(permission, this, [this](const QPermission &p) {
-            if (p.status() == Qt::PermissionStatus::Granted) {
-                doStartScan();
-            } else {
+        qApp->requestPermission(btPerm, this, [this](const QPermission &p) {
+            if (p.status() == Qt::PermissionStatus::Granted)
+                startScan(); // 位置情報権限チェックへ進む
+            else {
                 addLog("[Scan] ⚠ Bluetooth 権限が拒否されました");
                 addLog("[Scan]   設定 → アプリ → iBeacon Scanner → 権限 で許可してください");
                 setStatusText("エラー: Bluetooth 権限が必要です");
@@ -260,12 +259,29 @@ void BeaconScanner::startScan() {
         });
         return;
     }
-    if (status == Qt::PermissionStatus::Denied) {
+    if (qApp->checkPermission(btPerm) == Qt::PermissionStatus::Denied) {
         addLog("[Scan] ⚠ Bluetooth 権限が拒否されています");
         addLog("[Scan]   設定 → アプリ → iBeacon Scanner → 権限 で許可してください");
         setStatusText("エラー: Bluetooth 権限が必要です");
         return;
     }
+
+    // 2. 位置情報権限チェック（Android 12+ でデバイス名取得に必要）
+    QLocationPermission locPerm;
+    locPerm.setAccuracy(QLocationPermission::Precise);
+    locPerm.setAvailability(QLocationPermission::WhenInUse);
+
+    if (qApp->checkPermission(locPerm) == Qt::PermissionStatus::Undetermined) {
+        addLog("[Scan] Android: 位置情報権限をリクエスト中 (デバイス名の取得に必要)...");
+        qApp->requestPermission(locPerm, this, [this](const QPermission &p) {
+            if (p.status() != Qt::PermissionStatus::Granted)
+                addLog("[Scan] ⚠ 位置情報権限なし: デバイス名が表示されない場合があります");
+            doStartScan();
+        });
+        return;
+    }
+    if (qApp->checkPermission(locPerm) == Qt::PermissionStatus::Denied)
+        addLog("[Scan] ⚠ 位置情報権限なし: デバイス名が表示されない場合があります");
 #endif
     doStartScan();
 }

@@ -6,6 +6,8 @@
     android:versionName="-- %%INSERT_VERSION_NAME%% --">
     <!-- %%INSERT_PERMISSIONS -->
     <!-- %%INSERT_FEATURES -->
+    <!-- Android 12+ でも位置情報権限を宣言: BLUETOOTH_SCAN の neverForLocation 制約を解除してデバイス名を取得する -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <supports-screens
         android:anyDensity="true"
         android:largeScreens="true"
