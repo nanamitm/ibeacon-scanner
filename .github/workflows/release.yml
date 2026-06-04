@@ -112,6 +112,9 @@ jobs:
 
           cp resources/app_icon.png iBeaconScanner.png
 
+          # Mimer SQL ドライバは CI 環境に依存ライブラリ (libmimerapi.so) がないため除外
+          rm -f "$QT_ROOT_DIR/plugins/sqldrivers/libqsqlmimer.so" || true
+
           ./linuxdeploy \
             --appdir AppDir \
             --executable build/ibeacon-scanner \

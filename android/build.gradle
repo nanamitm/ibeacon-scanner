@@ -111,7 +111,16 @@ android {
 
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            // プロパティファイルが存在する場合のみ署名設定を適用する。
+            // CI 環境では apksigner で別途署名するためここでは不要。
+            def propsPath2 = System.getenv('ANDROID_SIGNING_PROPERTIES') ?: '../../android-signing.properties'
+            def propsFile2 = new File(propsPath2)
+            if (!propsFile2.isAbsolute()) {
+                propsFile2 = rootProject.file(propsPath2)
+            }
+            if (propsFile2.exists()) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
         }
     }
