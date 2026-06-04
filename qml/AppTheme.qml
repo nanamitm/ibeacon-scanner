@@ -31,11 +31,11 @@ QtObject {
     readonly property color danger: dark ? "#F28B82" : "#C62828"
     readonly property color neutral: dark ? "#AAB0BA" : "#757575"
 
-    readonly property color logBackground: dark ? "#111318" : "#1E1E1E"
-    readonly property color logText: dark ? "#DADCE0" : "#CCCCCC"
-    readonly property color logSuccess: dark ? "#81C995" : "#69FF47"
-    readonly property color logWarning: dark ? "#FDD663" : "#FFD93D"
-    readonly property color logError: dark ? "#F28B82" : "#FF6B6B"
+    readonly property color logBackground: dark ? "#111318" : palette.base
+    readonly property color logText:       dark ? "#DADCE0" : palette.windowText
+    readonly property color logSuccess:    dark ? "#81C995" : "#2E7D32"
+    readonly property color logWarning:    dark ? "#FDD663" : "#E65100"
+    readonly property color logError:      dark ? "#F28B82" : "#C62828"
 
     function luminance(color) {
         return 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.Material
 import QtQuick.Layouts
 
 ApplicationWindow {
@@ -11,6 +12,8 @@ ApplicationWindow {
     height: 800
     title: "iBeacon Scanner"
     color: palette.window
+    // Android(Material)スタイルがシステムのダーク/ライトモードに追随する
+    Material.theme: Material.System
 
     AppTheme {
         id: appTheme

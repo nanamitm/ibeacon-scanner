@@ -89,4 +89,30 @@ android {
         targetSdkVersion qtTargetSdkVersion
         ndk.abiFilters = qtTargetAbiList.split(",")
     }
+
+    signingConfigs {
+        release {
+            // android-signing.properties をプロジェクトルートから2階層上で検索
+            def propsPath = System.getenv('ANDROID_SIGNING_PROPERTIES') ?: '../../android-signing.properties'
+            def propsFile = new File(propsPath)
+            if (!propsFile.isAbsolute()) {
+                propsFile = rootProject.file(propsPath)
+            }
+            if (propsFile.exists()) {
+                def props = new Properties()
+                props.load(new FileInputStream(propsFile))
+                storeFile     file(props['storeFile'])
+                storePassword props['storePassword']
+                keyAlias      props['keyAlias']
+                keyPassword   props['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
 }

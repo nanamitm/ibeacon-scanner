@@ -48,3 +48,4 @@ android-build*/
 # Local settings and OS files
 .DS_Store
 Thumbs.db
+android-signing.properties
